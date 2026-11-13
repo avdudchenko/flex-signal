@@ -14,13 +14,14 @@ statsmodels, PyPOTS and other established libraries. flex-signal adds:
 - per-sample quality flags and provenance;
 - adapters to the rest of the ecosystem.
 
-> **Status: pre-alpha (M1).** Cleaning pipelines work: select, clean and
-> interpolate steps, JSON specs, fitted-pipeline persistence and synthetic test
-> data. The API may still change before 1.0. See [PLAN.md](PLAN.md) for the
+> **Status: pre-alpha (M2).** Pipelines select, clean, calibrate a stream
+> against an intermittent reference, and impute gaps by length, from Python or
+> JSON specs, with fitted-pipeline persistence and synthetic test data. The API
+> may still change before 1.0. See [PLAN.md](PLAN.md) for the
 > architecture and milestones.
 
 New here? The [tutorials](tutorials/) walk through the API from a first look
-at the data to multi-stream cleaning rules (`pip install -e ".[tutorials]"`,
+at the data to calibration and imputer benchmarks (`pip install -e ".[tutorials]"`,
 then `marimo edit tutorials/01_first_look.py`). They're also on the
 [docs site](https://flex-pse.github.io/flex-signal/tutorials/index.html).
 

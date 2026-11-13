@@ -41,10 +41,54 @@ register_backend(
     docs_url=f"{_SCIPY_DOCS}scipy.interpolate.Akima1DInterpolator.html",
 )
 
+register_backend(
+    "scipy:savgol_filter",
+    "scipy.signal:savgol_filter",
+    description="Savitzky-Golay smoothing: a moving polynomial fit.",
+    docs_url=f"{_SCIPY_DOCS}scipy.signal.savgol_filter.html",
+)
+register_backend(
+    "scipy:butter",
+    "scipy.signal:butter",
+    description="Butterworth filter design (second-order sections).",
+    docs_url=f"{_SCIPY_DOCS}scipy.signal.butter.html",
+)
+register_backend(
+    "scipy:sosfiltfilt",
+    "scipy.signal:sosfiltfilt",
+    description="Zero-phase (forward and backward) filtering.",
+    docs_url=f"{_SCIPY_DOCS}scipy.signal.sosfiltfilt.html",
+)
+register_backend(
+    "statsmodels:UnobservedComponents",
+    "statsmodels.tsa.statespace.structural:UnobservedComponents",
+    description="Structural state-space model; its Kalman smoother fills gaps.",
+    docs_url="https://www.statsmodels.org/stable/generated/"
+    "statsmodels.tsa.statespace.structural.UnobservedComponents.html",
+)
+register_backend(
+    "sklearn:KNNImputer",
+    "sklearn.impute:KNNImputer",
+    description="Fill a value from the k most similar rows.",
+    docs_url="https://scikit-learn.org/stable/modules/generated/"
+    "sklearn.impute.KNNImputer.html",
+)
+register_backend(
+    "sklearn:IterativeImputer",
+    "flexsignal.backends._iterative:IterativeImputer",
+    description="Model each stream from the others, round-robin (MICE-style).",
+    docs_url="https://scikit-learn.org/stable/modules/generated/"
+    "sklearn.impute.IterativeImputer.html",
+)
+
+# Imported last: it registers the linear-model keys.
+from flexsignal.backends import models  # noqa: E402
+
 __all__ = [
     "BACKEND_ENTRY_POINT_GROUP",
     "BackendInfo",
     "get_backend",
+    "models",
     "register_backend",
     "registered_backends",
 ]

@@ -87,6 +87,34 @@ Clean
 
 .. flexsignal-spec-table:: flexsignal.steps.clean.Expression
 
+.. autoclass:: Filter
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.clean.Filter
+
+.. autoclass:: Detotalize
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.clean.Detotalize
+
+Correct
+-------
+
+.. automodule:: flexsignal.steps.correct
+   :no-members:
+
+.. currentmodule:: flexsignal.steps.correct
+
+.. autoclass:: Calibrate
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.correct.Calibrate
+
+.. autoclass:: RollingRefit
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.correct.RollingRefit
+
 Impute
 ------
 
@@ -99,6 +127,46 @@ Impute
    :no-members:
 
 .. flexsignal-spec-table:: flexsignal.steps.impute.Interpolate
+
+.. autoclass:: Kalman
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.Kalman
+
+.. autoclass:: SeasonalTerm
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.SeasonalTerm
+
+.. autoclass:: Regression
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.Regression
+
+.. autoclass:: FourierTerm
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.FourierTerm
+
+.. autoclass:: KNN
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.KNN
+
+.. autoclass:: Iterative
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.Iterative
+
+.. autoclass:: Tiered
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.Tiered
+
+.. autoclass:: ImputeTier
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.impute.ImputeTier
 
 Writing a step
 --------------

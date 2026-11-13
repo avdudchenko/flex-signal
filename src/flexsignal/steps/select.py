@@ -322,7 +322,7 @@ class Mask(StepSpec):
 
     def transform(self, sf: SignalFrame, state: Mapping[str, Any]) -> SignalFrame:
         """Exclude values or drop rows (see the class docstring)."""
-        keep = evaluate_condition(sf.values, self.keep_when, field="keep_when")
+        keep = evaluate_condition(sf, self.keep_when, field="keep_when")
         if self.drop_rows:
             mask = keep.to_numpy()
             return sf.evolve(values=sf.values[mask], flags=sf.flags[mask])

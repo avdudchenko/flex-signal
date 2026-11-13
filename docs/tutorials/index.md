@@ -1,11 +1,12 @@
 # Tutorials
 
-The tutorials teach flex-signal step by step, from a first look at the data to multi-stream cleaning rules. Each
+The tutorials teach flex-signal step by step, from a first look at the data to calibration and imputation. Each
 one is a [marimo](https://marimo.io) notebook that you can read here or run yourself. Each release adds the
 tutorials for its new features.
 
-Every tutorial uses flex-signal's synthetic plant data, with faults injected at known places. So each step can
-be scored: how many faults it caught, how many it missed, and how much good data it removed by mistake.
+Every tutorial uses flex-signal's synthetic data, with faults injected at known places and the true values
+known. So each step can be scored: how many faults it caught, how many it missed, how much good data it removed
+by mistake, and how close a corrected or filled value is to the truth.
 
 <table>
   <thead>
@@ -34,6 +35,18 @@ be scored: how many faults it caught, how many it missed, and how much good data
       <td><a href="04_several_streams.html">Several streams</a></td>
       <td>Named inputs, aligning sources with different clocks, finding and removing a delay, masking
         operating periods, rules over several streams, combining meters</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><a href="05_calibrating_against_a_reference.html">Calibrating against a reference</a></td>
+      <td>Correcting a miscalibrated meter A from an intermittent, sometimes-wrong reference B:
+        <code>fit_when</code>, preferring the reference, following drift with a rolling refit</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td><a href="06_comparing_imputers.html">Comparing imputers by gap length</a></td>
+      <td>The masking benchmark, why the best imputer depends on the gap length, and building a tiered imputer
+        from the results</td>
     </tr>
   </tbody>
 </table>

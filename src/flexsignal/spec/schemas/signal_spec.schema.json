@@ -69,6 +69,178 @@
       "title": "Align",
       "type": "object"
     },
+    "Calibrate": {
+      "additionalProperties": false,
+      "description": "Correct a stream against an intermittent, trusted reference.\n\n1. **Fit.** On the *trusted rows*, the rows where the reference has a value\n   and ``fit_when`` holds, fit a model that maps the ``features`` (by default\n   the target itself) to the reference.\n2. **Apply.** Predict the corrected value wherever ``apply_when`` holds and\n   the features have values. These values are flagged ``CORRECTED``, on top\n   of the target's own flags. Where ``apply_when`` is false, the target's\n   value passes through unchanged.\n3. **Prefer the reference.** With ``prefer_reference``, the trusted rows take\n   the reference's own value and flags instead of a prediction.\n4. **Follow drift.** With ``refit={\"rolling\": \"1D\"}``, the model is refitted\n   for each block of time on the trusted rows of the window ending with that\n   block. The model fitted on the training data covers blocks whose window\n   has too few trusted rows.\n\nThe fitted state holds the coefficients (or the formula's parameters) and fit\nmetrics: rows used, RMSE and R\u00b2.\n\nModels (``model``): the linear models of\n:data:`~flexsignal.backends.models.LINEAR_MODELS`, e.g.\n``sklearn:HuberRegressor``, or ``scipy:curve_fit`` with a ``formula`` such as\n``\"a + b * A + c * A ** 2\"`` and ``initial`` values for its parameters.\n\nWith ``mode=\"residual\"`` the model predicts the error, ``reference - target``,\nand the corrected value is ``target + prediction``. Use it when the features\nexplain the error rather than the value, e.g. a temperature that biases A.",
+      "properties": {
+        "apply_when": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where to correct the target (default: everywhere). Elsewhere the target's value passes through unchanged.",
+          "title": "Apply When"
+        },
+        "features": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Model inputs (default: the target). Not used with scipy:curve_fit, whose formula names its inputs.",
+          "title": "Features"
+        },
+        "fit_when": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the reference can be trusted, e.g. 'C == 0 and D == 0 and B > 0'. Default: wherever it has a value.",
+          "title": "Fit When"
+        },
+        "formula": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For scipy:curve_fit: the model as a formula of streams and parameters, e.g. 'a + b * A'.",
+          "title": "Formula"
+        },
+        "initial": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "For scipy:curve_fit: a starting value for each parameter in the formula, e.g. {a: 0, b: 1}.",
+          "title": "Initial",
+          "type": "object"
+        },
+        "kind": {
+          "const": "calibrate",
+          "default": "calibrate",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mode": {
+          "default": "map",
+          "description": "map: predict the reference value; residual: predict reference - target and add it to the target.",
+          "enum": [
+            "map",
+            "residual"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "model": {
+          "default": "sklearn:LinearRegression",
+          "description": "The model: a linear model key such as sklearn:HuberRegressor or statsmodels:RLM, or scipy:curve_fit with a formula.",
+          "title": "Model",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the corrected stream (default: <target>_clean). Set it to the target's name to replace the target.",
+          "title": "Output"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Keyword arguments for the model, e.g. {alpha: 1.0} for Ridge.",
+          "title": "Params",
+          "type": "object"
+        },
+        "prefer_reference": {
+          "default": true,
+          "description": "Use the reference's own value on the rows where it is trusted.",
+          "title": "Prefer Reference",
+          "type": "boolean"
+        },
+        "reference": {
+          "description": "The trusted stream measuring the same quantity, e.g. B.",
+          "title": "Reference",
+          "type": "string"
+        },
+        "refit": {
+          "anyOf": [
+            {
+              "const": "static",
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/RollingRefit"
+            }
+          ],
+          "default": "static",
+          "description": "static: one model fitted on the training data; or {rolling: 1D} to refit on a moving window and follow drift.",
+          "title": "Refit"
+        },
+        "target": {
+          "description": "The stream to correct, e.g. A.",
+          "title": "Target",
+          "type": "string"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Units of the output (default: the target's units).",
+          "title": "Units"
+        }
+      },
+      "required": [
+        "target",
+        "reference"
+      ],
+      "title": "Calibrate",
+      "type": "object"
+    },
     "Combine": {
       "additionalProperties": false,
       "description": "Build a new stream from several, e.g. two redundant meters.\n\nThe result is flagged ``DERIVED``. For ``coalesce``, each sample takes the\nfirst stream (in order) that has a value, along with that stream's flags. For\nthe other methods, the result's flags are the OR of every input's flags.",
@@ -223,6 +395,78 @@
       "title": "CsvOutput",
       "type": "object"
     },
+    "Detotalize": {
+      "additionalProperties": false,
+      "description": "Turn a running total (a totalizer or counter) into a rate.\n\nEach valid sample gets the increase since the previous valid sample, divided\nby the time between them, per ``per``: a total in m^3 with ``per=\"1h\"`` gives\nm^3/hr. The rate is stamped at the end of its interval, and carries the flags\nof both samples. The first valid sample has no rate and is flagged\n``MISSING``.\n\nA counter that wraps around at ``rollover`` (e.g. 999999) is unwrapped. A\ntotal that drops with no ``rollover`` set was reset; the rate across the\nreset is unknown, so it is left missing and flagged ``OUT_OF_RANGE``.",
+      "properties": {
+        "kind": {
+          "const": "detotalize",
+          "default": "detotalize",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "per": {
+          "default": "1h",
+          "description": "Time unit of the rate, e.g. 1h.",
+          "title": "Per",
+          "type": "string"
+        },
+        "rollover": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Value at which the counter wraps back to 0.",
+          "title": "Rollover"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Units of the rate, e.g. m^3/hr (default: unchanged).",
+          "title": "Units"
+        }
+      },
+      "required": [
+        "streams"
+      ],
+      "title": "Detotalize",
+      "type": "object"
+    },
     "Expression": {
       "additionalProperties": false,
       "description": "Reject values wherever a user-written condition holds.\n\nFor example ``invalid_when=\"pressure < 0 or pump_on == 0\"``. Flags the\nrejected values with ``flag``, ``MANUAL`` by default.",
@@ -279,6 +523,122 @@
         "invalid_when"
       ],
       "title": "Expression",
+      "type": "object"
+    },
+    "Filter": {
+      "additionalProperties": false,
+      "description": "Smooth noise out of a stream.\n\n- ``savgol``: a Savitzky-Golay filter (:func:`scipy.signal.savgol_filter`)\n  fits a polynomial of degree ``polyorder`` across a moving ``window``. It\n  keeps peaks better than a moving average.\n- ``butterworth``: a low-pass Butterworth filter of ``order``, run forwards\n  and backwards so it adds no delay (:func:`scipy.signal.sosfiltfilt`). It\n  removes variation faster than ``cutoff``, a period such as 30min.\n- ``median``: a centred moving median over ``window``. It removes spikes as\n  well as noise, but flattens sharp peaks.\n\nEvery smoothed value is flagged ``FILTERED``. Missing values stay missing.\n``savgol`` and ``butterworth`` need a regular index and filter each unbroken\nrun of values separately; a run too short for the filter is left as it is.",
+      "properties": {
+        "cutoff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "butterworth: the shortest period of variation to keep, e.g. 1h.",
+          "title": "Cutoff"
+        },
+        "kind": {
+          "const": "filter",
+          "default": "filter",
+          "title": "Kind",
+          "type": "string"
+        },
+        "method": {
+          "description": "savgol, butterworth or median.",
+          "enum": [
+            "savgol",
+            "butterworth",
+            "median"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "order": {
+          "default": 4,
+          "description": "butterworth: filter order.",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        },
+        "polyorder": {
+          "default": 2,
+          "description": "savgol: degree of the fitted polynomial.",
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Polyorder",
+          "type": "integer"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        },
+        "window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "savgol and median: width of the moving window, e.g. 30min.",
+          "title": "Window"
+        }
+      },
+      "required": [
+        "streams",
+        "method"
+      ],
+      "title": "Filter",
+      "type": "object"
+    },
+    "FourierTerm": {
+      "additionalProperties": false,
+      "description": "A daily, weekly or other cycle, as sine and cosine inputs to a model.",
+      "properties": {
+        "harmonics": {
+          "default": 3,
+          "description": "How many sine/cosine pairs to use.",
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Harmonics",
+          "type": "integer"
+        },
+        "period": {
+          "description": "Length of one cycle, e.g. 1D or 7D.",
+          "title": "Period",
+          "type": "string"
+        }
+      },
+      "required": [
+        "period"
+      ],
+      "title": "FourierTerm",
       "type": "object"
     },
     "FrameInput": {
@@ -382,9 +742,51 @@
       "title": "Hampel",
       "type": "object"
     },
+    "ImputeTier": {
+      "additionalProperties": false,
+      "description": "One tier of a ``tiered`` imputer: a method for gaps up to a length.",
+      "properties": {
+        "max_gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Longest gap this tier fills, e.g. 15min. null on the last tier means every gap left.",
+          "title": "Max Gap"
+        },
+        "method": {
+          "description": "interpolate, kalman, regression, knn or iterative.",
+          "enum": [
+            "interpolate",
+            "kalman",
+            "regression",
+            "knn",
+            "iterative"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": true,
+          "description": "The method's other options, e.g. {method: pchip}.",
+          "title": "Options",
+          "type": "object"
+        }
+      },
+      "required": [
+        "max_gap",
+        "method"
+      ],
+      "title": "ImputeTier",
+      "type": "object"
+    },
     "Interpolate": {
       "additionalProperties": false,
-      "description": "Fill short interior gaps by interpolating between the valid values either side.\n\nA gap is a run of missing values. Its length is the time between the valid\nsample before it and the valid sample after it. Only gaps no longer than\n``max_gap`` are filled: on 5-minute data, ``max_gap=\"15min\"`` fills up to two\nmissing samples in a row. Gaps at the start or end of the data, and values\nflagged ``EXCLUDED`` or ``NO_SAMPLE``, are never filled. Filled values keep\nthe flags that explain why they were missing, and gain ``IMPUTED_SHORT``.\n\nMethods use numpy and scipy:\n\n- ``linear``: :func:`numpy.interp`;\n- ``nearest`` and ``previous``: :class:`scipy.interpolate.interp1d`;\n- ``pchip``: :class:`scipy.interpolate.PchipInterpolator`, shape-preserving\n  with no overshoot;\n- ``akima``: :class:`scipy.interpolate.Akima1DInterpolator`.",
+      "description": "Fill short interior gaps by interpolating between the valid values either side.\n\nOnly gaps no longer than ``max_gap`` are filled: on 5-minute data,\n``max_gap=\"15min\"`` fills up to two missing samples in a row. Gaps at the\nstart or end of the data are never filled. Filled values gain\n``IMPUTED_SHORT``.\n\nMethods use numpy and scipy:\n\n- ``linear``: :func:`numpy.interp`;\n- ``nearest`` and ``previous``: :class:`scipy.interpolate.interp1d`;\n- ``pchip``: :class:`scipy.interpolate.PchipInterpolator`, shape-preserving\n  with no overshoot;\n- ``akima``: :class:`scipy.interpolate.Akima1DInterpolator`.",
       "properties": {
         "kind": {
           "const": "interpolate",
@@ -438,6 +840,224 @@
         "max_gap"
       ],
       "title": "Interpolate",
+      "type": "object"
+    },
+    "Iterative": {
+      "additionalProperties": false,
+      "description": "Fill each stream from a model of the others, round-robin (MICE-style).\n\nUses :class:`sklearn.impute.IterativeImputer` with its default Bayesian\nridge model, on the ``streams`` and ``features`` scaled to unit variance. It\nlearns from the data it fills, so ``fit`` stores nothing; the random state is\nfixed, so results are repeatable. Filled values gain ``IMPUTED_MODEL``.",
+      "properties": {
+        "features": {
+          "default": [],
+          "description": "Other streams that help find similar rows; they are used, not filled.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Features",
+          "type": "array"
+        },
+        "kind": {
+          "const": "iterative",
+          "default": "iterative",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Longest gap to fill, measured between the valid samples either side, e.g. 6h. Default: every gap, including those at the start and end.",
+          "title": "Max Gap"
+        },
+        "max_iter": {
+          "default": 10,
+          "description": "Rounds of modelling.",
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Iter",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "required": [
+        "streams"
+      ],
+      "title": "Iterative",
+      "type": "object"
+    },
+    "KNN": {
+      "additionalProperties": false,
+      "description": "Fill a value from the rows whose other streams are most similar.\n\nUses :class:`sklearn.impute.KNNImputer` on the ``streams`` and ``features``,\neach scaled to unit variance first so units don't decide the distance. It\nlearns from the data it fills, so ``fit`` stores nothing. Filled values gain\n``IMPUTED_MODEL``. A row needs at least one other stream with a value.",
+      "properties": {
+        "features": {
+          "default": [],
+          "description": "Other streams that help find similar rows; they are used, not filled.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Features",
+          "type": "array"
+        },
+        "kind": {
+          "const": "knn",
+          "default": "knn",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Longest gap to fill, measured between the valid samples either side, e.g. 6h. Default: every gap, including those at the start and end.",
+          "title": "Max Gap"
+        },
+        "n_neighbors": {
+          "default": 5,
+          "description": "How many similar rows to use.",
+          "minimum": 1,
+          "title": "N Neighbors",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        },
+        "weights": {
+          "default": "uniform",
+          "description": "uniform: plain mean; distance: closer rows count more.",
+          "enum": [
+            "uniform",
+            "distance"
+          ],
+          "title": "Weights",
+          "type": "string"
+        }
+      },
+      "required": [
+        "streams"
+      ],
+      "title": "KNN",
+      "type": "object"
+    },
+    "Kalman": {
+      "additionalProperties": false,
+      "description": "Fill gaps with the Kalman smoother of a structural time-series model.\n\nEach stream is modelled as a level (``local_level``), or a level with a slope\n(``local_linear_trend``), plus optional ``seasonal`` cycles and noise, using\n:class:`statsmodels.tsa.statespace.structural.UnobservedComponents`. ``fit``\nestimates the model's variances on the training data by maximum likelihood\nand stores them as JSON. ``transform`` runs the Kalman smoother with those\nvalues, which estimates every missing value from the data on both sides of\nit. Filled values gain ``IMPUTED_MODEL``.\n\nIt needs a regular time index; run ``align`` or ``resample`` first. A long\ngap relaxes towards the level and cycles, so set ``seasonal`` when the\nstream has a daily pattern.",
+      "properties": {
+        "kind": {
+          "const": "kalman",
+          "default": "kalman",
+          "title": "Kind",
+          "type": "string"
+        },
+        "level": {
+          "default": "local_level",
+          "description": "How the underlying level moves.",
+          "enum": [
+            "local_level",
+            "local_linear_trend"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "max_gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Longest gap to fill, measured between the valid samples either side, e.g. 6h. Default: every gap, including those at the start and end.",
+          "title": "Max Gap"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "seasonal": {
+          "default": [],
+          "description": "Repeating cycles, e.g. [{period: 1D, harmonics: 2}].",
+          "items": {
+            "$ref": "#/$defs/SeasonalTerm"
+          },
+          "title": "Seasonal",
+          "type": "array"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "required": [
+        "streams"
+      ],
+      "title": "Kalman",
       "type": "object"
     },
     "Mask": {
@@ -692,6 +1312,97 @@
       "title": "RateOfChange",
       "type": "object"
     },
+    "Regression": {
+      "additionalProperties": false,
+      "description": "Fill gaps from a linear model of other streams and of time of day or week.\n\nThe inputs are the ``features`` streams, each also at every lag in ``lags``,\nand sine and cosine terms for each ``fourier`` cycle. ``fit`` learns one model\nper stream on the training rows where the stream and all its inputs have\nvalues, and stores the coefficients as JSON. ``transform`` fills a gap\nwherever the inputs have values. Filled values gain ``IMPUTED_MODEL``.\n\nModels are the linear models of\n:data:`~flexsignal.backends.models.LINEAR_MODELS`, e.g. ``sklearn:Ridge``.",
+      "properties": {
+        "features": {
+          "default": [],
+          "description": "Other streams the model uses, e.g. [pressure].",
+          "items": {
+            "type": "string"
+          },
+          "title": "Features",
+          "type": "array"
+        },
+        "fourier": {
+          "default": [],
+          "description": "Cycles to model, e.g. [{period: 1D, harmonics: 3}].",
+          "items": {
+            "$ref": "#/$defs/FourierTerm"
+          },
+          "title": "Fourier",
+          "type": "array"
+        },
+        "kind": {
+          "const": "regression",
+          "default": "regression",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lags": {
+          "default": [],
+          "description": "Also use each feature this long before, e.g. [5min, 15min]. Needs a regular index.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Lags",
+          "type": "array"
+        },
+        "max_gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Longest gap to fill, measured between the valid samples either side, e.g. 6h. Default: every gap, including those at the start and end.",
+          "title": "Max Gap"
+        },
+        "model": {
+          "default": "sklearn:Ridge",
+          "description": "A linear model key, e.g. sklearn:Ridge.",
+          "title": "Model",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Keyword arguments for the model.",
+          "title": "Params",
+          "type": "object"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "required": [
+        "streams"
+      ],
+      "title": "Regression",
+      "type": "object"
+    },
     "Rename": {
       "additionalProperties": false,
       "description": "Rename streams. Metadata and flags move with them.",
@@ -786,6 +1497,59 @@
         "freq"
       ],
       "title": "Resample",
+      "type": "object"
+    },
+    "RollingRefit": {
+      "additionalProperties": false,
+      "description": "Refit the calibration on a moving window, so it follows drift.",
+      "properties": {
+        "every": {
+          "default": "1D",
+          "description": "How often to refit. Each block of this length uses a model fitted on the window that ends where the block ends.",
+          "title": "Every",
+          "type": "string"
+        },
+        "min_rows": {
+          "default": 10,
+          "description": "Fewest trusted rows a window needs. Blocks with fewer use the model fitted on the training data.",
+          "minimum": 2,
+          "title": "Min Rows",
+          "type": "integer"
+        },
+        "rolling": {
+          "description": "Width of the window of trusted reference rows each refit uses, e.g. 1D.",
+          "title": "Rolling",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rolling"
+      ],
+      "title": "RollingRefit",
+      "type": "object"
+    },
+    "SeasonalTerm": {
+      "additionalProperties": false,
+      "description": "A repeating cycle, described by a few sine and cosine waves.",
+      "properties": {
+        "harmonics": {
+          "default": 2,
+          "description": "How many sine/cosine pairs describe its shape.",
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Harmonics",
+          "type": "integer"
+        },
+        "period": {
+          "description": "Length of one cycle, e.g. 1D or 7D.",
+          "title": "Period",
+          "type": "string"
+        }
+      },
+      "required": [
+        "period"
+      ],
+      "title": "SeasonalTerm",
       "type": "object"
     },
     "Shift": {
@@ -892,6 +1656,55 @@
         "min_duration"
       ],
       "title": "Stuck",
+      "type": "object"
+    },
+    "Tiered": {
+      "additionalProperties": false,
+      "description": "Route each gap to an imputer by its length.\n\nShort gaps are best interpolated; long ones need a model. For example::\n\n    tiers=[\n        {\"max_gap\": \"15min\", \"method\": \"interpolate\"},\n        {\"max_gap\": \"6h\", \"method\": \"regression\",\n         \"options\": {\"features\": [\"pressure\"]}},\n        {\"max_gap\": None, \"method\": \"kalman\"},\n    ]\n\nA gap goes to the first tier whose ``max_gap`` covers its length, measured in\nthe data as it arrives at this step. Each tier's imputer is fitted on the\ntraining data, and its state is kept under ``tiers``. Filled values carry the\nflag of the method that filled them.",
+      "properties": {
+        "kind": {
+          "const": "tiered",
+          "default": "tiered",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        },
+        "tiers": {
+          "description": "The tiers, shortest max_gap first.",
+          "items": {
+            "$ref": "#/$defs/ImputeTier"
+          },
+          "minItems": 1,
+          "title": "Tiers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "streams",
+        "tiers"
+      ],
+      "title": "Tiered",
       "type": "object"
     },
     "Tukey": {
@@ -1099,17 +1912,25 @@
         "discriminator": {
           "mapping": {
             "align": "#/$defs/Align",
+            "calibrate": "#/$defs/Calibrate",
             "combine": "#/$defs/Combine",
+            "detotalize": "#/$defs/Detotalize",
             "expression": "#/$defs/Expression",
+            "filter": "#/$defs/Filter",
             "hampel": "#/$defs/Hampel",
             "interpolate": "#/$defs/Interpolate",
+            "iterative": "#/$defs/Iterative",
+            "kalman": "#/$defs/Kalman",
+            "knn": "#/$defs/KNN",
             "mask": "#/$defs/Mask",
             "range": "#/$defs/Range",
             "rate_of_change": "#/$defs/RateOfChange",
+            "regression": "#/$defs/Regression",
             "rename": "#/$defs/Rename",
             "resample": "#/$defs/Resample",
             "shift": "#/$defs/Shift",
             "stuck": "#/$defs/Stuck",
+            "tiered": "#/$defs/Tiered",
             "tukey": "#/$defs/Tukey",
             "window": "#/$defs/Window"
           },
@@ -1120,16 +1941,34 @@
             "$ref": "#/$defs/Align"
           },
           {
+            "$ref": "#/$defs/Calibrate"
+          },
+          {
             "$ref": "#/$defs/Combine"
           },
           {
+            "$ref": "#/$defs/Detotalize"
+          },
+          {
             "$ref": "#/$defs/Expression"
+          },
+          {
+            "$ref": "#/$defs/Filter"
           },
           {
             "$ref": "#/$defs/Hampel"
           },
           {
             "$ref": "#/$defs/Interpolate"
+          },
+          {
+            "$ref": "#/$defs/Iterative"
+          },
+          {
+            "$ref": "#/$defs/Kalman"
+          },
+          {
+            "$ref": "#/$defs/KNN"
           },
           {
             "$ref": "#/$defs/Mask"
@@ -1139,6 +1978,9 @@
           },
           {
             "$ref": "#/$defs/RateOfChange"
+          },
+          {
+            "$ref": "#/$defs/Regression"
           },
           {
             "$ref": "#/$defs/Rename"
@@ -1151,6 +1993,9 @@
           },
           {
             "$ref": "#/$defs/Stuck"
+          },
+          {
+            "$ref": "#/$defs/Tiered"
           },
           {
             "$ref": "#/$defs/Tukey"

@@ -13,13 +13,17 @@ This is scikit-learn's fit/transform split, made functional. The step object hol
 fitted state is an explicit JSON dict. That's what lets a fitted pipeline save as JSON and travel to a Ray
 worker, and it keeps a spec unchanged when it's fitted.
 
-The built-in steps come in three groups:
+The built-in steps come in four groups:
 
 - **select**: `align`, `resample`, `window`, `mask`, `rename`, `combine`, `shift`. These put data on a grid,
   choose what to keep, and reshape. They never judge data quality.
 - **clean**: `range`, `rate_of_change`, `stuck`, `hampel`, `tukey`, `expression`. These find bad values, set
-  them to NaN, and flag why.
-- **impute**: `interpolate`. This fills short gaps and flags them. Model-based imputers arrive in M2.
+  them to NaN, and flag why. Two more reshape a signal: `filter` smooths noise, and `detotalize` turns a running
+  total into a rate.
+- **correct**: `calibrate`. This corrects a stream against a trusted, intermittent reference
+  ([Calibration](calibration.md)).
+- **impute**: `interpolate`, `kalman`, `regression`, `knn`, `iterative` and `tiered`. These fill gaps and flag
+  them ([Imputation tiers](imputation_tiers.md)).
 
 ## Wrap, don't reimplement
 
@@ -29,7 +33,10 @@ the first time it's used, so an optional library costs nothing until a step need
 missing, the error names the extra that installs it, for example
 `` pip install flex-signal[pypots] ``.
 
-Any `"package.module:attribute"` string also works as a key, which is how your own code plugs in.
+In Python, `get_backend` also accepts any `"package.module:attribute"` string, which is how your own code plugs
+in. Spec fields don't: a step's `model` must be one of the keys it lists, because loading a spec must never import
+code. Register a key with {func}`~flexsignal.backends.register_backend` from your own package to make it
+available by name.
 
 ```{eval-rst}
 .. flexsignal-backend-table::

@@ -345,6 +345,9 @@ class Pipeline:
             record = step_record(i, step, sf, after, digest)
             sf = after.with_record(record)
             states.append(state)
+            # Steps that fit a model report how well it fits (e.g. calibrate).
+            if isinstance(state.get("metrics"), dict):
+                record = {**record, "fit_metrics": state["metrics"]}
             records.append(record)
             if progress is not None:
                 progress((i + 1) / n, f"fit {step.kind}")

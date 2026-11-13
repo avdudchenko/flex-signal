@@ -35,3 +35,20 @@ Backends
 
 .. autoclass:: BackendInfo
    :members:
+
+Models for calibrate and regression
+-----------------------------------
+
+.. automodule:: flexsignal.backends.models
+   :no-members:
+
+.. currentmodule:: flexsignal.backends.models
+
+.. autodata:: LINEAR_MODELS
+   :no-value:
+
+.. autofunction:: fit_linear
+
+.. autofunction:: predict_linear
+
+.. autofunction:: fit_curve

@@ -7,7 +7,7 @@ kind, so adding a step kind means adding an example here.
 from __future__ import annotations
 
 from flexsignal.spec import Quantity, StepSpec
-from flexsignal.steps import clean, impute, select
+from flexsignal.steps import clean, correct, impute, select
 
 __all__ = ["one_of_every_step"]
 
@@ -32,5 +32,41 @@ def one_of_every_step() -> list[StepSpec]:
         clean.Hampel(["flow", "pressure"], window="1h", n_sigma=6),
         clean.Tukey("pressure", k=3),
         clean.Expression("pressure", invalid_when="pressure < 0", flag="OUT_OF_RANGE"),
+        clean.Filter("temperature", method="savgol", window="1h", polyorder=3),
+        clean.Detotalize("pressure", per="1min", rollover=1e6, units="bar/min"),
+        correct.Calibrate(
+            target="flow",
+            reference="reference_flow",
+            fit_when="pump_on == 1 and held(pump_on == 1, '30min')",
+            apply_when="not flagged(flow, 'STUCK')",
+            model="sklearn:HuberRegressor",
+            params={"epsilon": 1.5},
+            mode="residual",
+            features=["flow", "temperature"],
+            refit={"rolling": "2D", "every": "12h", "min_rows": 20},
+            output="flow_cal",
+        ),
         impute.Interpolate("flow", max_gap="15min", method="pchip"),
+        impute.Kalman("flow", level="local_linear_trend", seasonal=[{"period": "1D"}]),
+        impute.Regression(
+            "flow",
+            features=["pressure"],
+            lags=["5min"],
+            fourier=[{"period": "1D", "harmonics": 2}],
+            model="statsmodels:OLS",
+            max_gap="6h",
+        ),
+        impute.KNN("flow", features=["pressure"], n_neighbors=3, weights="distance"),
+        impute.Iterative("flow", features=["pressure"], max_iter=5),
+        impute.Tiered(
+            "flow",
+            tiers=[
+                {"max_gap": "15min", "method": "interpolate"},
+                {
+                    "max_gap": None,
+                    "method": "regression",
+                    "options": {"features": ["pressure"]},
+                },
+            ],
+        ),
     ]

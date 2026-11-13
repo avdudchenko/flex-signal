@@ -31,16 +31,16 @@ environment.
 ## Optional extras
 
 Each heavy or specialised library is an optional extra, added in the milestone whose code uses it. Only
-`tutorials` exists so far.
+`tutorials` exists so far: everything up to M2, including the calibration models, the Kalman, regression, k-NN and
+iterative imputers and the imputer benchmark, uses the core dependencies.
 
 | Extra | Contents | Milestone |
 |---|---|---|
 | `tutorials` | marimo (pinned) and matplotlib, to run the [tutorials](../tutorials/index.md) | M1 |
-| `eval` | pygrinder masking benchmarks | M2 |
 | `flexpse` | The latest flex-pse release (v0.3.0 today) with `parameterize`, installed from its git tag until flex-pse is on PyPI | M3 |
 | `ml` | skforecast, lightgbm | M4 |
 | `nixtla` | statsforecast, mlforecast | M4 |
-| `pypots` | PyPOTS deep imputation and forecasting | M5 |
+| `pypots` | PyPOTS deep imputation and forecasting, with pygrinder missing-data patterns | M5 |
 | `deep` | neuralforecast | M5 |
 | `foundation` | Chronos-2 zero-shot forecasting | M5 |
 | `anomaly` | pyod, ruptures, stumpy | M5 |

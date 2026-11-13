@@ -7,6 +7,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Calibration against a reference (M2).** `correct.Calibrate` fits a mapping from a stream to a trusted,
+  intermittent reference on the rows where `fit_when` holds, and applies it wherever `apply_when` holds. It
+  prefers the reference's own value where it is trusted (`prefer_reference`), flags predictions `CORRECTED`, and
+  can refit on a rolling window to follow drift (`refit={"rolling": "1D"}`). Models: `sklearn:LinearRegression`,
+  `Ridge`, `HuberRegressor`, `TheilSenRegressor`, `statsmodels:OLS`, `RLM`, and `scipy:curve_fit` with a
+  formula. `mode="residual"` models the error instead of the value. Fit metrics (rows, RMSE, R²) appear in the
+  fitted state and in `report()`.
+- **Model imputers (M2).** `impute.Kalman` (statsmodels structural model and Kalman smoother, with optional daily
+  or weekly cycles), `impute.Regression` (linear model of other streams, their lags, and Fourier terms),
+  `impute.KNN` and `impute.Iterative` (scikit-learn), and `impute.Tiered`, which routes each gap to a method by
+  its length. Every imputer takes `max_gap`, never fills `EXCLUDED` or `NO_SAMPLE` values, and flags what it
+  fills `IMPUTED_MODEL`.
+- **Signal steps (M2).** `clean.Filter` (Savitzky-Golay, zero-phase Butterworth, moving median) and
+  `clean.Detotalize` (running total to rate, with rollover and reset handling). New flag `FILTERED`.
+- **Condition helpers (M2).** `held(C == 0, "30min")`, `valid(B)`, `is_raw(B)` and `flagged(A, "OUTLIER")`, plus
+  `minimum`/`maximum`. Conditions are type-checked when a spec is loaded ("needs True/False", "gives numbers").
+  Formulas (numeric expressions with fitted parameters) for `scipy:curve_fit`.
+- **Imputer benchmark (M2).** `flexsignal.eval.benchmark_imputers` hides known values as gaps of given lengths,
+  lets each imputer fill them, and scores RMSE, MAE, bias and coverage; `hide_values` and `summarize` help.
+- **`synthetic.abcd`**: the A/B/C/D calibration problem with known truth, optional drift, and a reference that is
+  biased or reads 0 under known conditions.
+- **Docs (M2).** "flex-signal in ten minutes"; explanation pages on conditions, calibration and imputation tiers;
+  how-to guides to calibrate against a reference, impute gaps and evaluate imputers. Getting-started pages now
+  run in CI too.
+- **Tutorials (M2).** 05 calibrates A against B under conditions, with drift; 06 compares imputers by gap length
+  and builds a tiered imputer from the result.
+
+### Changed
+
+- Conditions no longer go through `pandas.eval`. flex-signal parses them and evaluates the tree itself with numpy.
+  Two semantics are now explicit: `&` and `|` bind like `and` and `or` (as in `pandas.eval`), and every
+  comparison with a missing value is False, `!=` included.
+- Model keys in specs (`calibrate`, `regression`) must be registered linear-model keys; arbitrary
+  `"package.module:Class"` paths are refused, so loading a spec never imports code.
+- Synthetic faults that only shift values (calibration, drift, step) no longer block later faults from being
+  injected on top of them.
+
 - **Core data model (M1).**
   - `SignalFrame`: values, a per-sample `uint16` quality-flag bitmask, per-stream `StreamMeta` (units, quantity
     kind, source) and provenance `history`. The time index is always tz-aware UTC, nanosecond resolution, sorted

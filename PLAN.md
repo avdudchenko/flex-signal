@@ -179,14 +179,19 @@ familiar sklearn feel at the pipeline level.
 
 ### 3.4 Conditions and selection
 
-Conditions use a small expression language that compiles to a boolean mask. It uses
-`pandas.DataFrame.eval`/`query` syntax over stream names: `"C == 0 and D == 0 and B > 0"`. Before pandas sees a
-condition, `check_condition` parses it with `ast` and allows only stream names, numbers, arithmetic, comparisons,
-boolean operators and a fixed list of math functions, so a condition can't run code (D15). New helpers must be
-added to that allowlist explicitly. On top of that it adds:
+Conditions use a small expression language that compiles to a boolean mask, with Python syntax over stream
+names: `"C == 0 and D == 0 and B > 0"`. `check_condition` parses it with `ast` and allows only stream names,
+numbers, arithmetic, comparisons, boolean operators and a fixed list of math functions, so a condition can't run
+code (D15). Since M2, flex-signal also evaluates the parsed tree itself with numpy, so `pandas.eval` is no longer
+involved (D16). New helpers must be added to the allowlist explicitly. On top of that it adds (M2):
 
-- duration helpers: `held("C == 0", "30min")` means the condition has been true for at least 30 minutes;
-- flag predicates: `is_raw("B")`, `not flagged("A", "OUTLIER")`.
+- a duration helper: `held(C == 0, "30min")` means the condition has been true, without a break, for at least
+  30 minutes;
+- flag and value predicates: `valid(B)`, `is_raw(B)`, `not flagged(A, "OUTLIER")`.
+
+Conditions are type-checked when a spec loads (a condition must give True/False; `and`/`or`/`not` need
+True/False operands). The same language without the helpers gives **formulas**, numeric expressions with fitted
+parameters, e.g. `"a + b * A"` for `scipy:curve_fit`.
 
 Every step that fits or applies something accepts `fit_when` and `apply_when`. This is how the multi-stream
 example is expressed without custom code.
@@ -202,8 +207,9 @@ variable error. The `calibrate` step works like this:
 3. **Prefer the reference.** With `prefer_reference=True`, `A_clean` takes B's own value wherever B is valid and
    trusted. Elsewhere it uses the calibrated A, and those values are flagged `CORRECTED`.
 4. **Track drift.** With `refit="rolling"`, the calibration is refit over a moving window of trusted B samples,
-   for example with statsmodels `RecursiveLS` or a windowed sklearn fit. The calibration then follows drift
-   between reference periods.
+   using the same model on each window. The calibration then follows drift between reference periods. (M2 refits
+   per block of time, `every`, on the window ending with that block; windows with too few trusted rows fall back
+   to the model fitted on the training data.)
 
 `report()` covers how many samples were fit, residual statistics, and for each sample whether it was referenced,
 calibrated or still missing.
@@ -216,18 +222,20 @@ pipe = fs.Pipeline(name="stream_a_cleanup", steps=[
     fs.clean.Range("B", min=0),                                    # basic hygiene first
     fs.clean.Hampel(["A", "B"], window="15min", n_sigma=3),
     fs.correct.Calibrate(
-        name="A_clean",
         target="A",                         # stream with the variable error
         reference="B",                      # trusted signal while the condition holds
         features=["A"],                     # model input(s); add others if the error depends on them
         fit_when="C == 0 and D == 0 and B > 0",
-        apply_when=None,                    # None = apply everywhere A is valid
-        model="sklearn:HuberRegressor",     # or "scipy:curve_fit:mypkg.forms:temp_comp", "statsmodels:RLM", ...
-        prefer_reference=True,              # use B itself where B is valid; calibrated A elsewhere
-        refit="static",                     # or {"rolling": "30D"} to follow drift between reference periods
-        output="new",                       # write A_clean as a new stream (default) or "replace" A
+        apply_when=None,                    # None = apply everywhere; elsewhere A passes through unchanged
+        model="sklearn:HuberRegressor",     # or "statsmodels:RLM", or "scipy:curve_fit" with formula=/initial=
+        prefer_reference=True,              # use B itself on the trusted rows; calibrated A elsewhere
+        refit="static",                     # or {"rolling": "2D"} to follow drift between reference periods
+        output="A_clean",                   # the default, <target>_clean; output="A" replaces A
     ),
-    fs.impute.Tiered("A_clean", short=("interpolate", "15min"), long="kalman"),
+    fs.impute.Tiered("A_clean", tiers=[
+        {"max_gap": "15min", "method": "interpolate"},
+        {"max_gap": None, "method": "kalman"},
+    ]),
 ])
 
 fitted = pipe.fit(sf_train)
@@ -247,11 +255,11 @@ The same pipeline as a spec. Python and JSON/YAML are interchangeable, both dire
     {"kind": "align", "freq": "1min", "how": "inner"},
     {"kind": "range", "streams": ["B"], "min": 0},
     {"kind": "hampel", "streams": ["A", "B"], "window": "15min", "n_sigma": 3},
-    {"kind": "calibrate", "name": "A_clean", "target": "A", "reference": "B", "features": ["A"],
+    {"kind": "calibrate", "target": "A", "reference": "B", "features": ["A"],
      "fit_when": "C == 0 and D == 0 and B > 0", "model": "sklearn:HuberRegressor",
-     "prefer_reference": true, "refit": "static"},
-    {"kind": "impute_tiered", "streams": ["A_clean"], "short": {"method": "interpolate", "max_gap": "15min"},
-     "long": {"method": "kalman"}}
+     "prefer_reference": true, "refit": "static", "output": "A_clean"},
+    {"kind": "tiered", "streams": ["A_clean"], "tiers": [
+      {"max_gap": "15min", "method": "interpolate"}, {"max_gap": null, "method": "kalman"}]}
   ],
   "outputs": [{"kind": "parquet", "path": "clean.parquet"}]
 }
@@ -397,8 +405,7 @@ Default: include it.
 
 | Extra | Packages | Purpose |
 |---|---|---|
-| `pypots` | pypots (+ pygrinder) | Deep imputation and forecasting (SAITS, BRITS, CSDI, TimesNet). Pulls in torch and transformers |
-| `eval` | pygrinder | Masking-based imputer benchmarking (MCAR and block gaps) without torch |
+| `pypots` | pypots (+ pygrinder) | Deep imputation and forecasting (SAITS, BRITS, CSDI, TimesNet), and pygrinder's missing-data patterns for the benchmark. Pulls in torch and transformers. M2's benchmark hides block and random gaps itself, so there is no separate `eval` extra (D20) |
 | `ml` | skforecast, lightgbm | Lightweight, pandas-native ML forecasting with exogenous variables |
 | `nixtla` | statsforecast, mlforecast | Fast AutoARIMA, ETS, MSTL and Theta. Successor to the flows-mpc stack |
 | `deep` | neuralforecast | NHITS, TiDE, PatchTST |
@@ -441,16 +448,16 @@ thin pandas-native protocol on sklearn's `BaseEstimator`, and treat sktime and d
 |---|---|---|
 | Select | `align`, `resample`, `window`, `mask`, `rename`, `combine`, `shift` | pandas |
 | Clean | `range`, `rate_of_change`, `stuck`, `hampel`, `tukey`, `expression` | pandas (in-house, ~15 lines each; ported from flows-prep) |
-| Clean | `filter` (savgol, butterworth `sosfiltfilt`, median) | scipy.signal |
+| Clean | `filter` (savgol, butterworth `sosfiltfilt`, median); sets `FILTERED` (D18) | scipy.signal / pandas |
 | Clean | `changepoint` | ruptures `[anomaly]` |
 | Clean | `detector` | pyod `[anomaly]` |
 | Clean | `detotalize` (totalizer → rate) | pandas (from flows-prep) |
-| Correct | `calibrate` (map/residual, `fit_when`/`apply_when`) | sklearn / statsmodels / `scipy.optimize.curve_fit` / pysr |
+| Correct | `calibrate` (map/residual, `fit_when`/`apply_when`) | sklearn / statsmodels linear models, `scipy.optimize.curve_fit` on a checked formula (D17); pysr later under `[symbolic]` |
 | Correct | `mass_balance` (reconcile children to parent) | scipy.optimize least squares |
 | Impute | `interpolate` (linear/time/pchip/akima, `max_gap`) | pandas / scipy |
 | Impute | `kalman` | statsmodels state space (`UnobservedComponents` / `SARIMAX` smoother) |
 | Impute | `regression` (lags, Fourier, other streams) | sklearn (ElasticNet / GBM) |
-| Impute | `knn`, `iterative` | sklearn |
+| Impute | `knn`, `iterative` (fitted on the data they fill; D19) | sklearn |
 | Impute | `pypots` | PyPOTS `[pypots]` |
 | Impute | `tiered` | Composition of the methods above, routed by gap length |
 | Forecast | `forecast`, `backtest` | statsmodels, skforecast, statsforecast, neuralforecast, chronos, pypots, darts/sktime adapters |
@@ -652,18 +659,21 @@ Every milestone also needs, per the definition of done in §7:
 ### M2: Calibrate and impute (0.2.0)
 
 - **Scope:**
-  - The condition language: pandas `eval` syntax plus `held(...)`, `is_raw(...)` and `flagged(...)`.
+  - The condition language: Python syntax plus `held(...)`, `valid(...)`, `is_raw(...)` and `flagged(...)`,
+    evaluated by flex-signal itself (D16).
   - `calibrate` with `fit_when`/`apply_when`, `prefer_reference`, and `refit` static or rolling. Backends:
-    sklearn, statsmodels and `curve_fit`.
+    sklearn, statsmodels and `curve_fit` (D17).
   - Imputers: `kalman` (statsmodels), `regression` (lags, Fourier terms, other streams), `knn`, `iterative` and
     `tiered`.
   - `filter` (savgol, butterworth, median) and `detotalize`.
-  - `eval`: a built-in masking benchmark (random and block gaps), with pygrinder optional under `[eval]`.
+  - `eval`: a built-in masking benchmark (random and block gaps). pygrinder moves to `[pypots]` in M5 (D20).
+  - `synthetic.abcd`: the A/B/C/D fixture with known truth, optional drift, and a conditionally wrong reference.
 - **Acceptance:**
   - On a synthetic A/B/C/D fixture with known true A and intermittent B, `A_clean` RMSE is under a set threshold.
   - With `refit="rolling"`, the calibration tracks an injected drift that `static` misses.
   - The imputer benchmark report runs on synthetic data and on the flex-pse biogas data.
   - An `interpolate` pipeline reproduces flex-pse's `imputed_bio_gas_generation.csv`.
+  - The two biogas items wait on open question O1 (§9).
 - **Docs:**
   - getting_started/ten_minutes, built around the A/B/C/D example;
   - explanation pages: conditions, calibration, imputation_tiers;
@@ -808,7 +818,14 @@ can run any pipeline on their own data, but none of it is shipped here.
 | D13 | **Rows added by joining inputs are flagged `NO_SAMPLE`** (2026-11-10), together with `MISSING`, and `align`, `resample` and `interpolate` skip them. Found while building tutorial 04: without the flag, an off-grid source aligned to the join's padding and came out all NaN (§3.2) |
 | D14 | **Naive timestamps are taken as the machine's local time, with a warning** (2026-11-10), instead of being refused. flex-pse work usually runs on a "local system" at, or set up for, one plant, and rarely mixes time zones, so refusing was friction without benefit. The zone comes from `tzlocal` (an IANA name, so daylight saving is handled), and `TZ` overrides it. `NaiveTimestampWarning` says which zone was assumed; `timezone=` silences it. Timestamps written in a spec still mean UTC, so a spec means the same on every machine. Daylight-saving gaps and repeats in naive data are still errors |
 | D15 | **Conditions are checked against an allowlist before they are evaluated** (2026-11-10). `pandas.eval` let a condition reach Python internals through attribute access (`flow.__class__.__init__.__globals__`) and call methods (`flow.abs()`), so a shared spec could run code. `check_condition` parses each condition with `ast` and accepts only stream names, numbers, arithmetic, comparisons, boolean operators and the functions in `CONDITION_FUNCTIONS`, with exponents of at most 100. It runs when a spec is loaded and again before evaluation. File paths in specs remain a trust issue (docs: spec_schema) |
+| D16 | **flex-signal evaluates conditions itself** (M2, 2026-11-11). The parsed, allowlisted tree is evaluated with numpy instead of being handed to `pandas.eval`. This removes the dependency on `pandas.eval`, lets helpers like `held()` read the time index and the flags, and lets conditions be type-checked when a spec loads. `&` and `|` keep `pandas.eval`'s low precedence, and every comparison with a missing value is False, `!=` included |
+| D17 | **Spec models are allowlisted keys, and fitted models are coefficients** (M2). `calibrate` and `regression` accept only registered linear-model keys (sklearn, statsmodels) or `scipy:curve_fit` with a checked formula, never a `"pkg.mod:Class"` path, so loading a spec never imports code. Every accepted model is linear in its coefficients, or a formula, so the fitted state is plain JSON numbers and applying it needs only numpy. Non-linear learned models (GBM and others) wait for a safe binary format such as skops |
+| D18 | **New flag `FILTERED`** (M2) for values a smoothing filter rewrote, so `is_raw()` and downstream users can tell them from readings. It is bit 14, which leaves one bit (15) free |
+| D19 | **`knn` and `iterative` are fitted on the data they fill** (M2). scikit-learn's fitted imputers can't be stored as JSON, so these two learn at transform time and store nothing at fit. `regression` and `kalman` are the fitted alternatives |
+| D20 | **The imputer benchmark is built in, without pygrinder** (M2). Hiding block and random gaps takes a few lines. pygrinder's richer missing-data patterns come with `[pypots]` in M5, so there is no `[eval]` extra |
 
 ### Open
 
-None at the moment. New questions will be added here as they come up during implementation.
+| # | Question |
+|---|---|
+| O1 | **The biogas test data** (2026-11-11). The plan assumed the data ships in a flex-pse release. It doesn't yet: `bio_gas_generation.csv` and `imputed_bio_gas_generation.csv` arrived on flex-pse `main` in "Arima integration (#102)" on 2026-11-10, after the latest release tag. Their upstream source, MuneebX00/Biogas-Time-Series-ML-Engine, still needs its licence confirmed before we vendor them. Until both are settled, M2's two biogas acceptance items and tutorial 06's biogas section are pending; everything else in M2 runs on synthetic data |

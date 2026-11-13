@@ -6,8 +6,11 @@ other subpackage may import it.
 
 from flexsignal.core.conditions import (
     CONDITION_FUNCTIONS,
+    CONDITION_HELPERS,
     check_condition,
+    check_formula,
     evaluate_condition,
+    evaluate_formula,
 )
 from flexsignal.core.exceptions import (
     NaiveTimestampWarning,
@@ -41,6 +44,7 @@ from flexsignal.core.registry import (
 
 __all__ = [
     "CONDITION_FUNCTIONS",
+    "CONDITION_HELPERS",
     "FLAGS_SUFFIX",
     "FLAG_DESCRIPTIONS",
     "FLAG_DTYPE",
@@ -57,7 +61,9 @@ __all__ = [
     "SignalWarning",
     "StreamMeta",
     "check_condition",
+    "check_formula",
     "evaluate_condition",
+    "evaluate_formula",
     "flag_names",
     "get_step_class",
     "local_timezone",

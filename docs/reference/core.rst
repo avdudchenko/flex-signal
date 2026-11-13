@@ -46,6 +46,13 @@ Conditions
 .. autodata:: CONDITION_FUNCTIONS
    :no-value:
 
+.. autodata:: CONDITION_HELPERS
+   :no-value:
+
+.. autofunction:: evaluate_formula
+
+.. autofunction:: check_formula
+
 Errors
 ------
 

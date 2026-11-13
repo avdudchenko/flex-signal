@@ -34,7 +34,7 @@ from flexsignal.core import (
 )
 from flexsignal.pipeline import FittedPipeline, Pipeline
 from flexsignal.spec import SCHEMA_VERSION, SignalSpec, dump_spec, load_spec, spec_hash
-from flexsignal.steps import clean, impute, select
+from flexsignal.steps import clean, correct, impute, select
 
 __version__ = _dist_version("flex-signal")
 
@@ -53,6 +53,7 @@ __all__ = [
     "StreamMeta",
     "__version__",
     "clean",
+    "correct",
     "dump_spec",
     "fit",
     "impute",

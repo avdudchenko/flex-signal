@@ -19,7 +19,13 @@ REPO = Path(__file__).resolve().parents[3]
 DOCS = REPO / "docs"
 FENCE = re.compile(r"^```python\n(.*?)^```", re.S | re.M)
 PAGES = (
-    sorted([*DOCS.glob("explanation/*.md"), *DOCS.glob("how_to/*.md")])
+    sorted(
+        [
+            *DOCS.glob("getting_started/*.md"),
+            *DOCS.glob("explanation/*.md"),
+            *DOCS.glob("how_to/*.md"),
+        ]
+    )
     if DOCS.exists()
     else []
 )
