@@ -36,6 +36,9 @@ Backends
 .. autoclass:: BackendInfo
    :members:
 
+.. automodule:: flexsignal.backends.builtin
+   :no-members:
+
 Models for calibrate and regression
 -----------------------------------
 

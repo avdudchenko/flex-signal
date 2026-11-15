@@ -19,5 +19,5 @@ Each future guide arrives with the milestone that builds the feature it uses:
 | Feed flexparameterize | M3 |
 | Apply data to a flex-pse model | M3 |
 | Forecast and backtest | M4 |
-| Write a backend | M5 |
+| Add your own cleaning, imputation or forecasting method | M5 |
 | Deploy a pipeline as an Acquirium App | M7 |

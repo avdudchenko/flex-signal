@@ -12,7 +12,8 @@ fit that down-weights outliers.
 
 Only the keys in :data:`LINEAR_MODELS` (and ``scipy:curve_fit``) are accepted. A
 spec can't name an arbitrary ``"package.module:Class"`` here, because loading a
-spec must never import code.
+spec must never import code. The keys themselves are registered, with the other
+built-in keys, in :mod:`flexsignal.backends.builtin`.
 """
 
 from __future__ import annotations
@@ -22,12 +23,9 @@ from typing import Any
 
 import numpy as np
 
-from flexsignal.backends.registry import get_backend, register_backend
+from flexsignal.backends.registry import get_backend
 from flexsignal.core.conditions import evaluate_formula
 from flexsignal.core.exceptions import SignalConfigError, SignalDataError
-
-_SKLEARN_DOCS = "https://scikit-learn.org/stable/modules/generated/"
-_SM_DOCS = "https://www.statsmodels.org/stable/generated/"
 
 LINEAR_MODELS: dict[str, str] = {
     "sklearn:LinearRegression": "Ordinary least squares.",
@@ -41,34 +39,6 @@ LINEAR_MODELS: dict[str, str] = {
 
 CURVE_FIT = "scipy:curve_fit"
 """Key for fitting a formula's parameters with :func:`scipy.optimize.curve_fit`."""
-
-for _key, _line in LINEAR_MODELS.items():
-    _lib, _name = _key.split(":")
-    if _lib == "sklearn":
-        register_backend(
-            _key,
-            f"sklearn.linear_model:{_name}",
-            description=_line,
-            docs_url=f"{_SKLEARN_DOCS}sklearn.linear_model.{_name}.html",
-        )
-    else:
-        register_backend(
-            _key,
-            f"statsmodels.api:{_name}",
-            description=_line,
-            docs_url=(
-                f"{_SM_DOCS}statsmodels.regression.linear_model.{_name}.html"
-                if _name == "OLS"
-                else f"{_SM_DOCS}statsmodels.robust.robust_linear_model.RLM.html"
-            ),
-        )
-register_backend(
-    CURVE_FIT,
-    "scipy.optimize:curve_fit",
-    description="Least-squares fit of a formula's parameters.",
-    docs_url="https://docs.scipy.org/doc/scipy/reference/generated/"
-    "scipy.optimize.curve_fit.html",
-)
 
 
 def check_model_key(key: str) -> str:

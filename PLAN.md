@@ -166,7 +166,8 @@ and a fitted pipeline saves as JSON and pickles for Ray. `Pipeline.fit` / `Fitte
 familiar sklearn feel at the pipeline level.
 
 - **Backends** are registered by a string key, for example `"sklearn:HuberRegressor"`, `"statsmodels:SARIMAX"`,
-  `"pypots:SAITS"`, `"nixtla:AutoETS"`, `"chronos:chronos-2"`, or `"pkg.mod:Class"` for user code. Each key maps
+  `"pypots:SAITS"`, `"nixtla:AutoETS"` or `"chronos:chronos-2"`. User code adds its own methods by registering them
+  (§3.8); a spec never names an import path (D17, D21). Each key maps
   to a small adapter that turns a `SignalFrame` into the shape the library wants and back again, keeping the
   index. Examples:
   - PyPOTS needs `{"X": [n, T, F]}` windows.
@@ -292,6 +293,86 @@ The spec mirrors `flexcore.config` one for one:
   as flows-prep's `get_train_test_folds`. Its output feeds flex-pse model selection.
 - The output is a `SignalFrame` flagged `FORECAST` that carries `issue_time` metadata. Optional quantile columns
   are named `<stream>__q10` and so on.
+
+### 3.8 Your own methods (extension API, M5)
+
+Users building their own flex-signal workflow need to plug in their own cleaning, imputation, forecasting and
+correction methods and run them from a JSON spec, without changing flex-signal's source. The rule that keeps this
+safe (D21):
+
+> **Only registered methods can run.** A method is registered by code: the user's script, or an installed
+> package. A spec refers to it by name only. A spec never names an import path, and loading or running a spec
+> never imports anything.
+
+So a spec from someone else can only use methods the person running it has chosen to make available.
+
+**Registering a method.** One function per role turns a plain Python function into a full step:
+
+```python
+import flexsignal as fs
+
+def despike(values, *, window: str = "1h", k: float = 4.0):
+    """Return True where a value should be rejected."""
+    ...
+
+def fill_from_neighbours(values, gaps, state, *, features: list[str], weight: float = 1.0):
+    """Return proposed values; only the positions in `gaps` are used."""
+    ...
+
+fs.register_cleaner("PlantDespike", despike, flag="OUTLIER")
+fs.register_imputer("CustomMethod", fill_from_neighbours)
+
+pipe = fs.Pipeline([
+    fs.clean.PlantDespike("flow", window="30min"),
+    fs.impute.CustomMethod("flow", features=["pressure"], weight=0.5, max_gap="6h"),
+])
+```
+
+and in a spec, once the same functions are registered:
+
+```json
+{"kind": "PlantDespike", "streams": ["flow"], "window": "30min"},
+{"kind": "CustomMethod", "streams": ["flow"], "features": ["pressure"], "weight": 0.5, "max_gap": "6h"}
+```
+
+| Function | The user's function does | flex-signal does |
+|---|---|---|
+| `register_cleaner(name, fn, flag=...)` | returns which values to reject | sets them to NaN, adds the flag, skips values already missing |
+| `register_imputer(name, fn, fit=None)` | proposes values for the gaps it is given | finds the gaps (`max_gap`, never `EXCLUDED` or `NO_SAMPLE`), writes only into them, flags `IMPUTED_MODEL`; usable as a `tiered` tier by name |
+| `register_forecaster(name, fn, fit=None)` | returns values for the horizon, from history and known future inputs | the M4 `Forecaster` protocol: issue time, `FORECAST` flag, quantile columns, backtesting |
+| `register_model(name, cls)` | a scikit-learn-style regressor whose fitted `coef_`/`intercept_` describe it | makes it a `model` choice for `calibrate` and `regression`; the fitted state stays JSON |
+
+- **Options come from the function's signature.** Keyword-only parameters, with their type hints and defaults,
+  become the step's fields through a generated pydantic model. JSON options are validated like any built-in step's,
+  and errors name the field (`steps.3.weight: ...`). The standard fields (`streams`, `name`, and `max_gap` for
+  imputers) are added by flex-signal.
+- **Fitting.** An optional `fit(values, **options) -> dict` learns from training data. Its result must be JSON, as
+  for built-in steps (D9), so fitted pipelines still save without pickle.
+- **Names.** A registered name must be a Python identifier and must not clash with a built-in kind. It is the
+  step's `kind` in JSON and its name in `fs.clean` / `fs.impute` / `fs.forecast` (resolved by each module's
+  `__getattr__`). Packages shared between teams should prefix their names, e.g. `PlantDespike`.
+- **Unregistered methods are errors**, raised when the spec loads: *unknown step kind 'CustomMethod'; register it
+  first, e.g. fs.register_imputer('CustomMethod', fn), or install the package that provides it*.
+
+**Making methods available without editing flex-signal.** Three ways, all chosen by the person running the spec:
+
+1. Register in the script, before loading the spec (as above).
+2. Install a package that registers its methods through the existing `flexsignal.steps` entry-point group; they
+   are available as soon as the package is installed.
+3. Name the modules to load in the call: `fs.load_plugins("myplant.methods")`, or
+   `fs.run(spec, data, plugins=["myplant.methods"])`. The module list comes from the caller's code, never from the
+   spec. A spec may list what it needs under `"requires": ["myplant.methods"]`, but only so the error message can
+   say what to install; flex-signal never imports from it.
+
+**Provenance and reuse.** Each history record of a custom step names the function behind it (module, qualified
+name, and the providing package's version), so a result says which code produced it. Loading a saved fitted
+pipeline needs the same methods registered first. For Ray workers, register from an importable module (option 2
+or 3) so workers can register the same methods.
+
+**One path for everyone.** `register_step` with a `StepSpec` subclass stays as the low-level route for full
+control. M5's own adapters (PyPOTS, Chronos, pyod, ...) are registered through the same public functions, so the
+extension API is exercised by flex-signal itself. The `function` step of the Derive category (§6) becomes a
+registered function looked up by name, not an import path in the spec.
 
 ---
 
@@ -461,7 +542,8 @@ thin pandas-native protocol on sklearn's `BaseEstimator`, and treat sktime and d
 | Impute | `pypots` | PyPOTS `[pypots]` |
 | Impute | `tiered` | Composition of the methods above, routed by gap length |
 | Forecast | `forecast`, `backtest` | statsmodels, skforecast, statsforecast, neuralforecast, chronos, pypots, darts/sktime adapters |
-| Derive | `expression`, `function` (`"pkg.mod:fn"`) | checked conditions (D15) / user code. `function` imports and runs code by design, so it must be opt-in for specs from elsewhere |
+| Derive | `expression`, `function` | checked conditions (D15) / a registered function, looked up by name (§3.8, D21) |
+| Any | user-registered cleaners, imputers, forecasters and models | the user's own code, registered before the spec loads (§3.8, D21) |
 
 ---
 
@@ -513,7 +595,7 @@ docs/
                      orchestrator_contract, acquirium_integration (M7)
   how_to/            clean_a_stream, calibrate_against_a_reference, impute_gaps, evaluate_imputers,
                      forecast_and_backtest, feed_flexparameterize, apply_to_a_flexpse_model,
-                     save_and_load_a_fitted_pipeline, write_a_backend, deploy_a_pipeline_app (M7)
+                     save_and_load_a_fitted_pipeline, add_your_own_method, deploy_a_pipeline_app (M7)
   tutorials/         index page linking the exported marimo tutorials (D12); the notebooks live in /tutorials
   examples/          runnable scripts on flexsignal.testing.synthetic data and the vendored flex-pse biogas data
   reference/         flexsignal.core, spec, steps (generated tables), backends, pipeline, api,
@@ -727,15 +809,30 @@ Every milestone also needs, per the definition of done in §7:
   - `[anomaly]`: pyod `detector`, ruptures `changepoint`, stumpy.
   - `[darts]` and `[sktime]` adapters.
   - `[units]`: pint conversion at the boundary.
+  - The extension API (§3.8, D21): `register_cleaner`, `register_imputer`, `register_forecaster`,
+    `register_model`, options generated from the function signature, `fs.load_plugins` / `plugins=`, the
+    `requires` hint, provenance records naming the function, and the adapters above registered through it.
 - **Acceptance:**
   - Each adapter has a test that is skipped cleanly when its extra is missing, and a CI matrix job installs
     `[all]`.
+  - A cleaner, an imputer, a forecaster and a model registered from a test module run from a JSON spec with
+    output identical to the same steps built in Python, and save, load and transform as fitted pipelines.
+  - Loading a spec that names an unregistered method fails with the "register it first" error; a spec can't make
+    flex-signal import a module (contract test, alongside the D15 condition checks).
+  - Invalid options to a registered method fail on load with the field named.
   - The PyPOTS windowing round trip preserves the index.
   - The benchmark compares SAITS with the `tiered` imputer on synthetic and biogas data.
-- **Docs:** how_to/write_a_backend and the generated backend table, with the extra for every backend.
-- **Tutorials:** 09 Deep imputation and forecasting with PyPOTS and Chronos, compared with the core methods. If
-  training is too slow for CI, the tutorial loads committed, precomputed results, and a test checks that they
-  still reproduce.
+- **Docs:** explanation/extending (the "only registered methods run" rule), how_to/add_your_own_method, and
+  the generated backend table, with the extra for every backend. The step and backend tables list registered
+  methods too, marked as such.
+- **Tutorials:**
+  - 09 Deep imputation and forecasting with PyPOTS and Chronos, compared with the core methods. If training is
+    too slow for CI, the tutorial loads committed, precomputed results, and a test checks that they still
+    reproduce.
+  - 10 Your own methods: register a cleaner, an imputer and a model; use them from Python and from a JSON spec;
+    score them against the injected faults and a built-in method; save and reload the fitted pipeline; see what
+    is refused (an unregistered kind, bad options); and package the methods so `pip install` makes them
+    available.
 
 ### M6: Stable release (1.0.0)
 
@@ -751,7 +848,7 @@ Every milestone also needs, per the definition of done in §7:
   - `pip install flex-signal` from PyPI works.
   - flex-orchestrator maintainers sign off that the API is enough for their wrapper.
 - **Docs:** explanation/orchestrator_contract, a migration guide, and a complete reference.
-- **Tutorials:** 10 A cleaning spec as a flex-orchestrator study: the run/fit contract, payloads, and migrating
+- **Tutorials:** 11 A cleaning spec as a flex-orchestrator study: the run/fit contract, payloads, and migrating
   an old spec. Revisit browser-run tutorials (§7), now that flex-signal is on PyPI.
 
 ### M7: Acquirium (1.1.0)
@@ -767,7 +864,7 @@ Every milestone also needs, per the definition of done in §7:
   - A forecast run is stored and read back.
   - Redeploying with new parameters doesn't trigger a digest mismatch.
 - **Docs:** explanation/acquirium_integration and how_to/deploy_a_pipeline_app.
-- **Tutorials:** 11 A live Acquirium soft sensor: a `PipelineApp` that cleans a stream and stores a forecast,
+- **Tutorials:** 12 A live Acquirium soft sensor: a `PipelineApp` that cleans a stream and stores a forecast,
   run on the in-repo test driver.
 
 ### Test data
@@ -823,6 +920,7 @@ can run any pipeline on their own data, but none of it is shipped here.
 | D18 | **New flag `FILTERED`** (M2) for values a smoothing filter rewrote, so `is_raw()` and downstream users can tell them from readings. It is bit 14, which leaves one bit (15) free |
 | D19 | **`knn` and `iterative` are fitted on the data they fill** (M2). scikit-learn's fitted imputers can't be stored as JSON, so these two learn at transform time and store nothing at fit. `regression` and `kalman` are the fitted alternatives |
 | D20 | **The imputer benchmark is built in, without pygrinder** (M2). Hiding block and random gaps takes a few lines. pygrinder's richer missing-data patterns come with `[pypots]` in M5, so there is no `[eval]` extra |
+| D21 | **Users add methods by registering them; only registered methods run** (2026-11-15). Custom cleaners, imputers, forecasters and models are registered in code (`fs.register_imputer("CustomMethod", fn)`, an installed package's entry point, or `plugins=` named by the caller) before a spec loads, and a spec refers to them by name. Specs never name import paths, so a spec from someone else can run only what the person running it chose to register. The function's signature defines the step's validated options, and flex-signal does the bookkeeping (gaps, flags, provenance). Replaces the `"pkg.mod:fn"` derive step and the idea of letting specs name classes (§3.8, M5) |
 
 ### Open
 

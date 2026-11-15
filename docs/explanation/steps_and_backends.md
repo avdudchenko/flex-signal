@@ -35,8 +35,12 @@ missing, the error names the extra that installs it, for example
 
 In Python, `get_backend` also accepts any `"package.module:attribute"` string, which is how your own code plugs
 in. Spec fields don't: a step's `model` must be one of the keys it lists, because loading a spec must never import
-code. Register a key with {func}`~flexsignal.backends.register_backend` from your own package to make it
-available by name.
+code. You can register keys of your own with {func}`~flexsignal.backends.register_backend`, or through the
+`flexsignal.backends` entry-point group, and use them from [your own steps](#adding-your-own-step) with
+`get_backend`. The built-in steps don't accept registered keys yet: `calibrate` and `regression` take only the
+models they list, and `interpolate` only its fixed methods. M5 adds a simpler route: register a plain function as a
+cleaner, imputer, forecaster or model, and use it by name from Python or a JSON spec. Only registered methods can
+run, so a spec still can't make flex-signal import code.
 
 ```{eval-rst}
 .. flexsignal-backend-table::
