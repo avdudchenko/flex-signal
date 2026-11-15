@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.24.0"
+__generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
 
@@ -56,7 +56,12 @@ def _(mo):
     mo.md(r"""
     # 5. Calibrating A against an intermittent reference B
 
-    This is the problem flex-signal was built for:
+    Facilities commonnly have many sensors, some sensors might be measuring
+    all the time, but have errors, while accurate sensors might not be always
+    online. flex-signal is designed to help correct live sensors, by filtering out
+    when good sensor data is available.
+
+    For example:
 
     > Meter **A** always reports, but it is miscalibrated, and its error
     > changes over time. Meter **B** measures the same flow accurately, but
@@ -126,6 +131,54 @@ def _(mo):
     A sits well below the true flow. B is right when it reports, except in
     the shaded periods: high while C is open, and 0 while D runs.
 
+    ## The core call
+
+    Here is the whole job in flex-signal, before we take it apart. Describe
+    the step, then fit it and apply it to the data:
+    """)
+    return
+
+
+@app.cell
+def _(fs, raw):
+    calibrate = fs.correct.Calibrate(
+        target="A",  # the stream to correct
+        reference="B",  # the trusted stream
+        fit_when="C == 0 and D == 0 and B > 0",  # when B can be trusted
+    )
+    fitted, out = fs.Pipeline([calibrate]).fit_transform(raw)
+
+    # The result is a new stream, A_clean, next to the originals.
+    out.to_pandas().loc["2025-01-12 06:45":"2025-01-12 07:15", ["A", "B", "A_clean"]]
+    return fitted, out
+
+
+@app.cell
+def _(fitted, fs, mo, out, raw, rmse):
+    _metrics = fitted.states[0]["metrics"]
+    _first = fs.core.flag_names(int(out.flags["A_clean"].loc["2025-01-12 06:45"]))
+    _later = fs.core.flag_names(int(out.flags["A_clean"].loc["2025-01-12 07:15"]))
+    # Display only (marimo): render the result as formatted text.
+    mo.md(f"""
+    Until 07:00, B is reporting and trusted, so `A_clean` takes B's own
+    reading (flags: {_first or "none"}). From 07:00, B is silent, and
+    `A_clean` is A run through the fitted calibration (flags:
+    {", ".join(_later)}). The fit used **{_metrics["rows"]}** trusted rows
+    (R² = {_metrics["r2"]:.3f}), and `A_clean` is off by
+    **{rmse(out.values["A_clean"]):.2f} m³/h** over the fortnight, against
+    {rmse(raw.values["A"]):.1f} m³/h for raw A.
+
+    `fitted` is the fitted pipeline: the spec plus the calibration's
+    coefficients, saved as JSON with `fitted.save(...)` and applied to new
+    data with `fitted.transform(...)`. The rest of this tutorial looks at
+    what each option of `Calibrate` does.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## Step 1: say when B can be trusted
 
     `Calibrate` learns a mapping from A to B. It fits only on the **trusted
@@ -156,16 +209,21 @@ def _(mo):
 
 
 @app.cell
-def _(FIT_WHEN, fs, pd, raw, rmse):
+def _(FIT_WHEN, evaluate_condition, fs, pd, raw, rmse):
     def calibrated(**options):
         """Fit Calibrate on the raw data and return (fitted, corrected frame)."""
         step = fs.correct.Calibrate(target="A", reference="B", **options)
         return fs.Pipeline([step]).fit_transform(raw)
 
     _rows = []
+    fit_when_outputs = {}  # choice -> (corrected A, rows used for the fit)
     for _label, _condition in FIT_WHEN.items():
         _fitted, _out = calibrated(fit_when=_condition, prefer_reference=False)
         _metrics = _fitted.states[0]["metrics"]
+        _used = raw.values["B"].notna()
+        if _condition is not None:
+            _used &= evaluate_condition(raw, _condition)
+        fit_when_outputs[_label] = (_out.values["A_clean"], _used)
         _rows.append(
             {
                 "fit_when": _label,
@@ -176,7 +234,7 @@ def _(FIT_WHEN, fs, pd, raw, rmse):
         )
     fit_when_table = pd.DataFrame(_rows).set_index("fit_when")
     raw_error = rmse(raw.values["A"])
-    return calibrated, fit_when_table, raw_error
+    return calibrated, fit_when_outputs, fit_when_table, raw_error
 
 
 @app.cell
@@ -197,12 +255,58 @@ def _(fit_when_choice, fit_when_table, mo, raw_error):
     return
 
 
+@app.cell
+def _(COLORS, fit_when_choice, fit_when_outputs, plt, raw, rmse, style, true_a):
+    _day = slice("2025-01-12", "2025-01-13")
+    _fig, _axes = plt.subplots(2, 2, figsize=(10, 5.2), sharex=True, sharey=True)
+    for _ax, (_label, (_clean, _used)) in zip(
+        _axes.flat, fit_when_outputs.items(), strict=True
+    ):
+        _b = raw.values["B"].loc[_day]
+        _in_fit = _used.loc[_day]
+        _ax.plot(true_a.loc[_day], color=COLORS["truth"], lw=2.5, label="true flow")
+        _ax.plot(
+            raw.values["A"].loc[_day],
+            color=COLORS["signal"],
+            lw=0.6,
+            alpha=0.5,
+            label="raw A",
+        )
+        _ax.plot(_clean.loc[_day], color=COLORS["filled"], lw=1, label="A_clean")
+        _ax.plot(_b[_in_fit], ".", ms=4, color=COLORS["filled"], label="B, fitted on")
+        _ax.plot(_b[~_in_fit], "x", ms=4, color=COLORS["fault"], label="B, left out")
+        _chosen = _label == fit_when_choice.value
+        style(_ax).set_title(
+            f"{_label}\nerror over the fortnight {rmse(_clean):.1f} m³/h",
+            loc="left",
+            fontsize=9,
+            fontweight="bold" if _chosen else "normal",
+        )
+    for _ax in _axes[:, 0]:
+        _ax.set_ylabel("flow [m³/h]", color="#4a5568")
+    _fig.autofmt_xdate()
+    _fig.tight_layout(rect=(0, 0, 1, 0.94))
+    _handles, _labels = _axes[0, 0].get_legend_handles_labels()
+    _fig.legend(_handles, _labels, frameon=False, ncol=5, fontsize=8, loc="upper left")
+    _fig
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Fitting on every B value makes A **worse than not calibrating at all**:
-    the zeros and the high readings drag the line off. Each clause you add
-    removes one kind of bad reference row, and with the full condition the
+    The four panels show the same two days as before, corrected with each
+    choice of `fit_when` (the selected one has a bold title). Fitting on
+    every B value makes A **worse than not calibrating at all**: the zeros
+    and the high readings drag the line off, and `A_clean` ends up with the
+    wrong gain, roughly right at peak flow but far too low at low flow.
+
+    `B > 0` drops the zeros, and the error falls to about 3 m³/h, but the
+    high readings while C is open still pull `A_clean` above the true flow
+    at peak. Adding `D == 0` changes nothing here: B reads 0 whenever D
+    runs, so `B > 0` had already dropped those rows. On real data, keep the
+    clause anyway if D can also make B wrong without zeroing it. Only
+    `C == 0` removes the high readings, and with the full condition the
     corrected A is as accurate as A's own noise allows.
 
     The fit R² tells the same story without knowing the truth. That is the
@@ -242,7 +346,7 @@ def _(Flag, calibrated, pd, rmse):
         index=["B itself (trusted rows)", "calibrated A (CORRECTED)"],
     )
     sources
-    return TRUSTED, corrected, fitted_static, sources
+    return TRUSTED, fitted_static, sources
 
 
 @app.cell(hide_code=True)
@@ -305,11 +409,20 @@ def _(TRUSTED, fs, np, pd, synthetic):
         }
     )
     drift_table.index.name = "refit"
-    return drift_results, drift_table, drift_truth
+    return drift_case, drift_results, drift_table, drift_truth
 
 
 @app.cell
-def _(COLORS, drift_results, drift_table, drift_truth, mo, plt, style, window_choice):
+def _(
+    COLORS,
+    drift_results,
+    drift_table,
+    drift_truth,
+    mo,
+    plt,
+    style,
+    window_choice,
+):
     _fig, _ax = plt.subplots(figsize=(9, 2.8))
     for _key, _color, _label in (
         ("static", COLORS["fault"], "static"),
@@ -417,10 +530,15 @@ def _(
     final_error,
     fit_when_table,
     fitted_static,
+    fs,
+    out,
     raw_error,
     sources,
 ):
     # These checks run when CI runs the tutorial as a script.
+    _flags = out.flags["A_clean"]
+    assert _flags.loc["2025-01-12 06:45"] == 0  # B's own reading
+    assert _flags.loc["2025-01-12 07:15"] == fs.Flag.CORRECTED  # calibrated A
     _errors = fit_when_table["error of corrected A [m³/h]"]
     assert _errors.iloc[0] > raw_error  # no fit_when: worse than raw A
     assert _errors.is_monotonic_decreasing  # each clause helps

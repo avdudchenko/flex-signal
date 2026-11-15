@@ -16,13 +16,14 @@ def _():
 
     import flexsignal as fs
     from flexsignal.core import Flag
-    from flexsignal.eval import benchmark_imputers, summarize
+    from flexsignal.eval import benchmark_imputers, hide_values, summarize
     from flexsignal.testing import synthetic
 
     return (
         Flag,
         benchmark_imputers,
         fs,
+        hide_values,
         mo,
         np,
         pd,
@@ -114,6 +115,66 @@ def _(COLORS, clean, plt, style):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## The core calls
+
+    Before the full comparison, here is the idea in a few lines. Hide some
+    values whose truth we know, fill them with an imputer, and score the
+    fill:
+    """)
+    return
+
+
+@app.cell
+def _(clean, fs, hide_values, np):
+    # Hide three 6-hour gaps in the flow; `hidden` marks where.
+    masked, hidden = hide_values(clean, ["flow"], gap="6h", count=3, seed=0)
+
+    # An imputer is a step like any other: describe it, then fit and apply it.
+    imputer = fs.impute.Regression("flow", features=["pressure"])
+    _, filled = fs.Pipeline([imputer]).fit_transform(masked)
+
+    # Score the fill against the values that were hidden.
+    _where = hidden["flow"]
+    error = filled.values["flow"][_where] - clean.values["flow"][_where]
+    rms_error = float(np.sqrt(np.mean(error**2)))
+    rms_error
+    return imputer, rms_error
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    `benchmark_imputers` does exactly that for several imputers and gap
+    lengths at once, and `summarize` turns its results into a table of the
+    RMS error by imputer and gap length:
+    """)
+    return
+
+
+@app.cell
+def _(benchmark_imputers, clean, fs, imputer, summarize):
+    quick = benchmark_imputers(
+        clean,
+        {
+            "linear": fs.impute.Interpolate("flow", max_gap="1D"),
+            "regression": imputer,
+        },
+        streams=["flow"],
+        gaps=["30min", "6h"],
+        count=5,
+    )
+    quick_rmse = summarize(quick)
+    quick_rmse.round(2)
+    return (quick_rmse,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Interpolation wins the short gaps and loses the long ones. The rest of
+    this tutorial does the same with more methods and gap lengths, then
+    turns the result into a tiered imputer.
+
     ## The candidates
 
     Every imputer is set up to attempt every gap (`max_gap` wide or unset),
@@ -143,16 +204,28 @@ def _(fs):
         "iterative": fs.impute.Iterative("flow", features=["pressure", "temperature"]),
     }
     GAPS = ["10min", "30min", "2h", "6h", "12h"]
-    return GAPS, candidates
+    # One colour per candidate, used in every figure below.
+    FILL_COLORS = {
+        "linear": "#dd6b20",
+        "pchip": "#f6ad55",
+        "kalman": "#b794f4",
+        "kalman + daily cycle": "#805ad5",
+        "regression on pressure": "#2f855a",
+        "knn": "#d53f8c",
+        "iterative": "#319795",
+    }
+    return FILL_COLORS, GAPS, candidates
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## One gap, three fills
+    ## One gap, five fills
 
     First, one gap by hand. We hide the flow around the start of a pump
-    stop, then let three methods fill it. A gap's length is measured the way
+    stop, then let five methods fill it: two that use only the flow itself,
+    and three that also use the pressure (and, for knn and iterative, the
+    temperature). A gap's length is measured the way
     imputers measure it, between the valid samples either side, so a
     30-minute gap on 5-minute data hides 5 samples. Pick a length:
     """)
@@ -168,7 +241,7 @@ def _(GAPS, mo):
 
 
 @app.cell
-def _(COLORS, candidates, clean, fs, gap_choice, np, pd, plt, style):
+def _(COLORS, FILL_COLORS, candidates, clean, fs, gap_choice, np, pd, plt, style):
     # Hide the samples of one gap, centred on the start of the third pump stop.
     _pump = clean.values["pump_on"].to_numpy()
     _stop = np.flatnonzero(np.diff(_pump) < 0)[2] + 1
@@ -180,42 +253,45 @@ def _(COLORS, candidates, clean, fs, gap_choice, np, pd, plt, style):
     _span = slice(
         max(_where[0] - 3 * len(_where) - 12, 0), _where[-1] + 3 * len(_where) + 12
     )
-    _fig, _ax = plt.subplots(figsize=(9, 2.8))
+    _fig, _axes = plt.subplots(1, 2, figsize=(10, 3.0), sharey=True)
     _times = clean.index[_span]
-    _ax.plot(
-        _times,
-        clean.values["flow"].iloc[_span],
-        color=COLORS["truth"],
-        lw=2,
-        label="hidden truth",
+    _groups = (
+        ("Uses only the flow", ["linear", "kalman + daily cycle"]),
+        (
+            "Also uses pressure (and temperature)",
+            ["regression on pressure", "knn", "iterative"],
+        ),
     )
-    _ax.plot(
-        _times,
-        _masked.values["flow"].iloc[_span],
-        color=COLORS["signal"],
-        lw=1,
-        label="what the imputer sees",
-    )
-    for _name, _color in (
-        ("linear", COLORS["fault"]),
-        ("kalman + daily cycle", "#805ad5"),
-        ("regression on pressure", COLORS["filled"]),
-    ):
-        _, _out = fs.Pipeline([candidates[_name]]).fit_transform(_masked)
+    for _ax, (_title, _names) in zip(_axes, _groups, strict=True):
         _ax.plot(
-            clean.index[_where],
-            _out.values["flow"].iloc[_where],
-            ".",
-            ms=4,
-            color=_color,
-            label=_name,
+            _times,
+            clean.values["flow"].iloc[_span],
+            color=COLORS["truth"],
+            lw=2,
+            label="hidden truth",
         )
-    style(_ax, "flow [m³/h]").set_title(
-        f"One hidden {gap_choice.value} gap", loc="left", fontsize=10
-    )
-    _ax.legend(
-        frameon=False, ncol=5, fontsize=8, loc="lower left", bbox_to_anchor=(0, 1.08)
-    )
+        _ax.plot(
+            _times,
+            _masked.values["flow"].iloc[_span],
+            color=COLORS["signal"],
+            lw=1,
+            label="what the imputer sees",
+        )
+        for _name in _names:
+            _, _out = fs.Pipeline([candidates[_name]]).fit_transform(_masked)
+            _ax.plot(
+                clean.index[_where],
+                _out.values["flow"].iloc[_where],
+                {"knn": "x", "iterative": "+"}.get(_name, "."),
+                ms=4 if _name not in ("knn", "iterative") else 5,
+                color=FILL_COLORS[_name],
+                label=_name,
+            )
+        style(_ax).set_title(_title, loc="left", fontsize=10)
+        _ax.tick_params(axis="x", labelrotation=30, labelsize=8)
+        _ax.legend(frameon=False, fontsize=8, loc="lower right")
+    _axes[0].set_ylabel("flow [m³/h]", color="#4a5568")
+    _fig.suptitle(f"One hidden {gap_choice.value} gap", x=0.01, ha="left", fontsize=10)
     _fig.tight_layout()
     _fig
     return
@@ -226,8 +302,8 @@ def _(mo):
     mo.md(r"""
     For a short gap every method does about as well as the noise allows. For
     a long one the line just joins the two ends, and the daily cycle is no
-    help, because the pump stops inside the gap. The regression follows the
-    pressure, so it sees the stop.
+    help, because the pump stops inside the gap. The three methods on the
+    right all see the pressure, so they all see the stop.
 
     ## The benchmark
 
@@ -252,18 +328,11 @@ def _(GAPS, benchmark_imputers, candidates, clean, summarize):
 
 
 @app.cell
-def _(COLORS, GAPS, plt, rmse, style):
+def _(FILL_COLORS, GAPS, plt, rmse, style):
     _fig, _ax = plt.subplots(figsize=(7, 3.2))
-    _styles = {
-        "linear": (COLORS["fault"], "-"),
-        "pchip": (COLORS["fault"], ":"),
-        "kalman": ("#805ad5", ":"),
-        "kalman + daily cycle": ("#805ad5", "-"),
-        "regression on pressure": (COLORS["filled"], "-"),
-        "knn": (COLORS["signal"], "-"),
-        "iterative": (COLORS["signal"], ":"),
-    }
-    for _name, (_color, _ls) in _styles.items():
+    _dotted = {"pchip", "kalman", "iterative"}  # so overlapping lines stay visible
+    for _name, _color in FILL_COLORS.items():
+        _ls = ":" if _name in _dotted else "-"
         _ax.plot(
             GAPS, rmse.loc[_name], ls=_ls, marker="o", ms=3, color=_color, label=_name
         )
@@ -273,6 +342,125 @@ def _(COLORS, GAPS, plt, rmse, style):
         "Error of the fill, by gap length", loc="left", fontsize=10
     )
     _ax.legend(frameon=False, fontsize=8, loc="center left", bbox_to_anchor=(1, 0.5))
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## What the fills look like
+
+    The table averages over many gaps. To see what each candidate actually
+    put back, here are the gaps from the benchmark's first repeat: the same
+    `hide_values` call with the same seed, so they are exactly the gaps that
+    were scored. Pick a gap length, then one of its six gaps. The gap shown
+    first is the one where linear interpolation does worst.
+    """)
+    return
+
+
+@app.cell
+def _(GAPS, mo):
+    # Notebook control (marimo): a dropdown to choose the gap length.
+    fill_gap_choice = mo.ui.dropdown(options=GAPS, value="6h", label="gap length")
+    fill_gap_choice
+    return (fill_gap_choice,)
+
+
+@app.cell
+def _(GAPS, candidates, clean, fill_gap_choice, fs, hide_values, np):
+    # The benchmark seeds each gap length's first repeat as seed + 1000 * index.
+    _masked, _hidden = hide_values(
+        clean,
+        ["flow"],
+        gap=fill_gap_choice.value,
+        count=6,
+        seed=1 + 1000 * GAPS.index(fill_gap_choice.value),
+    )
+    fill_hidden = _hidden["flow"].to_numpy()
+    fill_masked = _masked
+    fills = {
+        _name: fs.Pipeline([_step]).fit_transform(_masked)[1].values["flow"]
+        for _name, _step in candidates.items()
+    }
+    # Split the hidden samples into the six separate gaps.
+    _pos = np.flatnonzero(fill_hidden)
+    fill_runs = np.split(_pos, np.flatnonzero(np.diff(_pos) > 1) + 1)
+    _truth = clean.values["flow"].to_numpy()
+    _linear = fills["linear"].to_numpy()
+    worst_run = int(
+        np.argmax([np.mean((_linear[r] - _truth[r]) ** 2) for r in fill_runs])
+    )
+    return fill_hidden, fill_masked, fill_runs, fills, worst_run
+
+
+@app.cell
+def _(fill_runs, mo, worst_run):
+    # Notebook control (marimo): a slider to choose which gap to show.
+    run_choice = mo.ui.slider(
+        start=1,
+        stop=len(fill_runs),
+        value=worst_run + 1,
+        label="which gap",
+        show_value=True,
+    )
+    run_choice
+    return (run_choice,)
+
+
+@app.cell
+def _(
+    COLORS,
+    FILL_COLORS,
+    clean,
+    fill_gap_choice,
+    fill_masked,
+    fill_runs,
+    fills,
+    np,
+    plt,
+    run_choice,
+    style,
+):
+    _run = fill_runs[run_choice.value - 1]
+    _pad = max(2 * len(_run), 24)
+    _span = slice(max(_run[0] - _pad, 0), min(_run[-1] + _pad + 1, len(clean)))
+    _times = clean.index[_span]
+    _truth = clean.values["flow"]
+    _fig, _axes = plt.subplots(2, 4, figsize=(11, 4.6), sharex=True, sharey=True)
+    for _ax, (_name, _filled) in zip(_axes.flat, fills.items(), strict=False):
+        _error = np.sqrt(np.mean((_filled.iloc[_run] - _truth.iloc[_run]) ** 2))
+        _ax.plot(_times, _truth.iloc[_span], color=COLORS["truth"], lw=2.5)
+        _ax.plot(
+            _times,
+            fill_masked.values["flow"].iloc[_span],
+            color=COLORS["signal"],
+            lw=0.8,
+        )
+        _ax.plot(
+            clean.index[_run], _filled.iloc[_run], ".", ms=3, color=FILL_COLORS[_name]
+        )
+        style(_ax).set_title(
+            f"{_name}\nerror {_error:.1f} m³/h", loc="left", fontsize=9
+        )
+        _ax.tick_params(axis="x", labelrotation=30, labelsize=7)
+    # The eighth panel holds the legend.
+    _key = _axes.flat[-1]
+    _key.axis("off")
+    _key.plot([], [], color=COLORS["truth"], lw=2.5, label="hidden truth")
+    _key.plot([], [], color=COLORS["signal"], lw=0.8, label="what the imputer sees")
+    _key.plot([], [], ".", color="#4a5568", label="the imputer's fill")
+    _key.legend(frameon=False, fontsize=8, loc="center left")
+    for _ax in _axes[:, 0]:
+        _ax.set_ylabel("flow [m³/h]", color="#4a5568")
+    _fig.suptitle(
+        f"Gap {run_choice.value} of {len(fill_runs)}, {fill_gap_choice.value} long",
+        x=0.01,
+        ha="left",
+        fontsize=10,
+    )
     _fig.tight_layout()
     _fig
     return
@@ -382,8 +570,11 @@ def _(mo):
 
 
 @app.cell
-def _(boundary, comparison, coverage, rmse, tiered_rmse):
+def _(boundary, comparison, coverage, quick_rmse, rms_error, rmse, tiered_rmse):
     # These checks run when CI runs the tutorial as a script.
+    assert rms_error < 3
+    assert quick_rmse.loc["linear", "30min"] < quick_rmse.loc["regression", "30min"]
+    assert quick_rmse.loc["linear", "6h"] > quick_rmse.loc["regression", "6h"]
     assert (coverage == 1.0).all().all()
     # Interpolation is near the best for short gaps and far off for long ones.
     assert rmse.loc["linear", "10min"] <= 1.2 * rmse["10min"].min()
