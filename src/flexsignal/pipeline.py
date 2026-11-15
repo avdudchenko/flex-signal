@@ -258,8 +258,12 @@ def _check_json_state(state: Any, step: StepSpec, index: int) -> dict[str, Any]:
 class Pipeline:
     """An unfitted pipeline: a spec you can fit.
 
+    Steps run in order. Give them all at once as a list, or add them one at a
+    time with :meth:`add_step`; both build the same spec.
+
     Args:
-        steps: The steps, in order.
+        steps: The steps, in order (default: none yet; add them with
+            :meth:`add_step`).
         name: Pipeline name.
         inputs: Input slots (see :func:`~flexsignal.pipeline.bind_inputs`).
         outputs: Where :func:`flexsignal.run` writes results.
@@ -268,8 +272,12 @@ class Pipeline:
 
     Examples:
         >>> import flexsignal as fs
-        >>> pipe = fs.Pipeline([fs.clean.Range("flow", min=0)], name="demo")
-        >>> pipe.spec.steps[0].kind
+        >>> pipe = fs.Pipeline(name="demo")
+        >>> pipe.add_step(fs.clean.Range("flow", min=0))
+        Pipeline('demo': range)
+        >>> pipe.add_step(fs.impute.Interpolate("flow", max_gap="15min"))
+        Pipeline('demo': range, interpolate)
+        >>> fs.Pipeline([fs.clean.Range("flow", min=0)], name="demo").spec.steps[0].kind
         'range'
     """
 
@@ -299,6 +307,32 @@ class Pipeline:
         pipeline = cls.__new__(cls)
         pipeline.spec = load_spec(spec)
         return pipeline
+
+    def add_step(self, step: StepSpec | Mapping[str, Any]) -> Pipeline:
+        """Add a step after the ones already in the pipeline.
+
+        The step is checked straight away, as it would be in a list: an unknown
+        ``kind``, bad options, or a ``name`` another step already has raise here.
+
+        Args:
+            step: A step object, e.g. ``fs.clean.Range("flow", min=0)``, or a step
+                dict with a ``kind``, as in a JSON spec.
+
+        Returns:
+            This pipeline, so calls can be chained, as in
+            ``pipe.add_step(a).add_step(b)``.
+        """
+        spec = self.spec
+        self.spec = SignalSpec(
+            schema_version=spec.schema_version,
+            name=spec.name,
+            description=spec.description,
+            inputs=spec.inputs,
+            steps=[*spec.steps, step],
+            outputs=spec.outputs,
+            metadata=spec.metadata,
+        )
+        return self
 
     def __repr__(self) -> str:
         """Show the name and step kinds."""

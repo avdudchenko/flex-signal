@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`Pipeline.add_step`.** Build a pipeline one step at a time: `pipe = fs.Pipeline(name="x")`, then
+  `pipe.add_step(step)` for each step, in the order they should run. Each step is checked as it is added, and the
+  call returns the pipeline so it can be chained. Passing a list still works and builds the same spec.
 - **Calibration against a reference (M2).** `correct.Calibrate` fits a mapping from a stream to a trusted,
   intermittent reference on the rows where `fit_when` holds, and applies it wherever `apply_when` holds. It
   prefers the reference's own value where it is trusted (`prefer_reference`), flags predictions `CORRECTED`, and

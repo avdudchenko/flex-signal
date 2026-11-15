@@ -21,7 +21,7 @@ Pipelines
 ---------
 
 .. autoclass:: Pipeline
-   :members: from_spec, fit, fit_transform
+   :members: add_step, from_spec, fit, fit_transform
 
 .. autoclass:: FittedPipeline
    :members: transform, report, to_payload, from_payload, save, load
