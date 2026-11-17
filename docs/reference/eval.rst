@@ -11,3 +11,5 @@ Evaluation
 .. autofunction:: hide_values
 
 .. autofunction:: summarize
+
+.. autofunction:: metrics

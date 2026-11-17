@@ -1,12 +1,20 @@
 name: CI
 
 # Mirrors flex-pse v0.3.0's ci.yml (uv installs, one coverage run, wheel-based
-# standard install), minus the solver setup flex-signal does not need.
+# standard install). The integration job installs the latest flex-pse release
+# (with HiGHS) from its git tag; a weekly job runs it against flex-pse main.
 
 on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"  # Mondays: integration against flex-pse main
+
+env:
+  # The latest flex-pse release (PLAN.md D3). flex-pse isn't on PyPI, so it is
+  # pinned by git tag here and in environment.yml; bump both together.
+  FLEXPSE_REF: "0.3.1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -79,6 +87,7 @@ jobs:
 
   integration:
     name: integration
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,11 +99,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
       # The tutorials extra lets the integration tier run every marimo tutorial
-      # as a script (PLAN.md D12).
+      # as a script (PLAN.md D12); flex-pse, with HiGHS, runs the hand-off tests.
       - run: uv pip install --system -e ".[dev,tutorials]"
+      - run: uv pip install --system "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@${FLEXPSE_REF}"
       # pytest exits 5 if no tests are collected; that is treated as success so
-      # this job never fails just for being empty. When M3 lands, this job also
-      # installs the latest flex-pse release from its git tag (PLAN.md D3).
+      # this job never fails just for being empty.
       - shell: bash
         run: |
           set +e
@@ -103,6 +112,21 @@ jobs:
           set -e
           if [ "$exit_code" -eq 5 ]; then exit 0; fi
           exit "$exit_code"
+
+  flexpse-main:
+    name: integration (flex-pse main)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv pip install --system -e ".[dev,tutorials]"
+      # flex-pse main, to catch breakage before the next release (PLAN.md D3).
+      - run: uv pip install --system "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@main"
+      - run: pytest -m integration
 
   build-wheel:
     name: build-wheel
@@ -151,6 +175,7 @@ jobs:
               "flexsignal", "flexsignal.core", "flexsignal.spec", "flexsignal.io",
               "flexsignal.backends", "flexsignal.steps", "flexsignal.pipeline",
               "flexsignal.eval", "flexsignal.api", "flexsignal.testing",
+              "flexsignal.handoff",
               "flexsignal.integrations",
               "flexsignal.integrations.flexpse", "flexsignal.integrations.acquirium",
           ]

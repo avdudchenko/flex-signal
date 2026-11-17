@@ -593,8 +593,8 @@ def _(mo):
     mo.md(r"""
     ## What's next
 
-    The next release connects cleaned data to flex-pse: aligning it to a
-    model's time grid and handing it to `flexparameterize`.
+    Tutorial 07 hands cleaned data to a flex-pse model: lined up with the
+    model's time steps, fixed into it, and prepared for fitting a surrogate.
     """)
     return
 

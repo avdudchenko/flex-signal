@@ -7,6 +7,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Hand-off to models (M3).** `flexsignal.handoff` turns cleaned data into what a model needs, with no model
+  library imported:
+  - `to_grid(data, grid, options)` gives one value per model time step: UTC to the facility's `timezone`,
+    `offset` and `data_years` to read other windows, forward or backward interval resampling with an `agg`, summed
+    amounts split over finer steps, gap rules (`interpolate`, `ffill`, `zero`, `error`, with a `limit`), or
+    `reduce` to one number. The result (`GridValues`) carries units, filled counts, steps resting on filled or
+    corrected samples, the window read, `to_overrides()` and `data_hash()`. `data_window` says which UTC data
+    that reads.
+  - `fit_data(X, y, prep)` joins input and output frames, resamples, applies a gap rule (`error`, `drop`,
+    `interpolate`, `longest_segment`), logs each step and hashes the result; `split_holdout` keeps the end for
+    testing. flex-signal stops at `X, y`: call a flex-pse regressor yourself, with `fit.input_units` and
+    `fit.output_units`.
+  - `grids_of`, `scope_of`, `targets`: which time block a model path belongs to, for models with several.
+  - `GridOptions` and `FitPrep` keep flex-orchestrator's field names, defaults and validation.
+
+  These functions, and their tests, come from flex-orchestrator, which will call them instead of its own copies
+  (PLAN.md D22, `FLEX_ORCHESTRATOR_OVERLAP.md`).
+- **flex-pse integration (M3).** `flexsignal.integrations.flexpse`: `time_grid` (a flowsheet spec's or built
+  model's time points, one axis per time block), `time_scopes`, and `apply_values`, which takes a spec or a
+  built model with the same result: on a spec, a copy with `fix` elements (and costing fields such as a flat price);
+  on a built model, its variables fixed in place (and mutable Params, such as a price built as a Param, set). flex-pse is
+  imported only inside these functions; `import flexsignal` still loads no flex-pse, pyomo or idaes.
+- **`flexsignal.eval.metrics`** (RMSE, MAE, MAPE), and `fs.eval` / `fs.handoff` reachable from `import flexsignal`.
+- **Docs and tutorial (M3).** An explanation page on handing data to flex-pse models; how-to guides to apply data to
+  a flex-pse model and to prepare fit data; tutorial 07, from raw data to a solved flex-pse model and a fitted
+  surrogate.
+- **CI.** The integration job installs the latest flex-pse release (0.3.1, by git tag, with HiGHS); a weekly job
+  runs it against flex-pse `main`. `environment.yml` installs the same pin.
 - **`Pipeline.add_step`.** Build a pipeline one step at a time: `pipe = fs.Pipeline(name="x")`, then
   `pipe.add_step(step)` for each step, in the order they should run. Each step is checked as it is added, and the
   call returns the pipeline so it can be chained. Passing a list still works and builds the same spec.

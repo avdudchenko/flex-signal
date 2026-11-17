@@ -37,7 +37,7 @@ iterative imputers and the imputer benchmark, uses the core dependencies.
 | Extra | Contents | Milestone |
 |---|---|---|
 | `tutorials` | marimo (pinned) and matplotlib, to run the [tutorials](../tutorials/index.md) | M1 |
-| `flexpse` | The latest flex-pse release (v0.3.0 today) with `parameterize`, installed from its git tag until flex-pse is on PyPI | M3 |
+| flex-pse | The latest flex-pse release (0.3.1 today), for `flexsignal.integrations.flexpse` and tutorial 07. Not on PyPI yet, so install it from its git tag (below); `environment.yml` already does | M3 |
 | `ml` | skforecast, lightgbm | M4 |
 | `nixtla` | statsforecast, mlforecast | M4 |
 | `pypots` | PyPOTS deep imputation and forecasting, with pygrinder missing-data patterns | M5 |
@@ -47,3 +47,15 @@ iterative imputers and the imputer benchmark, uses the core dependencies.
 | `darts`, `sktime` | Adapters to the darts and sktime model zoos | M5 |
 | `units` | pint, pint-pandas | M5 |
 | `acquirium` | Acquirium client | M7 |
+
+## flex-pse
+
+`flexsignal.handoff` needs nothing extra. Fixing a flex-pse model's variables (`flexsignal.integrations.flexpse`),
+the flex-pse how-to guides and tutorial 07 need flex-pse itself. It isn't on PyPI yet, so install the latest release
+from its git tag, with HiGHS to solve:
+
+```bash
+pip install "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@0.3.1"
+```
+
+`import flexsignal` never imports flex-pse, pyomo or idaes, so the rest of flex-signal works without it.

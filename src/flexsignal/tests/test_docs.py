@@ -77,6 +77,8 @@ def test_tutorial_runs_as_a_script(tutorial, tmp_path):
     # it checks what it teaches, not only that it doesn't crash.
     pytest.importorskip("marimo", reason="needs the tutorials extra")
     pytest.importorskip("matplotlib", reason="needs the tutorials extra")
+    if "from flexops" in tutorial.read_text(encoding="utf-8"):
+        pytest.importorskip("flexops", reason="needs flex-pse (see installation)")
     result = subprocess.run(
         [sys.executable, str(tutorial)],
         cwd=tmp_path,

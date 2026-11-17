@@ -21,6 +21,8 @@ Example:
 
 from importlib.metadata import version as _dist_version
 
+# Imported as modules: fs.handoff.to_grid, fs.eval.benchmark_imputers.
+from flexsignal import eval, handoff  # noqa: A004  (eval: the subpackage)
 from flexsignal.api import RunResult, fit, run
 from flexsignal.core import (
     Flag,
@@ -54,8 +56,10 @@ __all__ = [
     "__version__",
     "clean",
     "correct",
+    "eval",
     "dump_spec",
     "fit",
+    "handoff",
     "impute",
     "load_spec",
     "local_timezone",

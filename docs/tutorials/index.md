@@ -1,6 +1,6 @@
 # Tutorials
 
-The tutorials teach flex-signal step by step, from a first look at the data to calibration and imputation. Each
+The tutorials teach flex-signal step by step, from a first look at the data to calibration, imputation and handing data to flex-pse models. Each
 one is a [marimo](https://marimo.io) notebook that you can read here or run yourself. Each release adds the
 tutorials for its new features.
 
@@ -47,6 +47,12 @@ by mistake, and how close a corrected or filled value is to the truth.
       <td><a href="06_comparing_imputers.html">Comparing imputers by gap length</a></td>
       <td>The masking benchmark, why the best imputer depends on the gap length, and building a tiered imputer
         from the results</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td><a href="07_raw_data_to_a_flexpse_model.html">From raw data to a flex-pse model</a></td>
+      <td>Lining cleaned data up with a model's time steps in the plant's time zone, fixing a model's variables
+        and solving it, and preparing fit data for a flex-pse regressor (needs flex-pse)</td>
     </tr>
   </tbody>
 </table>

@@ -6,13 +6,13 @@ include_external_packages = True
 # Layering (PLAN.md §3.1). Higher layers may import lower ones, never the
 # reverse. Siblings separated by "|" must not import each other.
 [importlinter:contract:layers]
-name = core <- {spec | io} <- backends <- steps <- pipeline <- {eval | api | testing} <- integrations
+name = core <- {spec | io} <- backends <- steps <- pipeline <- {eval | api | testing | handoff} <- integrations
 type = layers
 containers =
     flexsignal
 layers =
     integrations
-    eval | api | testing
+    eval | api | testing | handoff
     pipeline
     steps
     backends
@@ -47,11 +47,13 @@ source_modules =
     flexsignal.eval
     flexsignal.api
     flexsignal.testing
+    flexsignal.handoff
     flexsignal.integrations.acquirium
 forbidden_modules =
     flexcore
     flexops
     flexparameterize
+    flexdesign
     pyomo
     idaes
 
@@ -69,6 +71,7 @@ source_modules =
     flexsignal.eval
     flexsignal.api
     flexsignal.testing
+    flexsignal.handoff
     flexsignal.integrations.flexpse
 forbidden_modules =
     acquirium

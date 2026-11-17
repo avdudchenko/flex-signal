@@ -14,10 +14,10 @@ statsmodels, PyPOTS and other established libraries. flex-signal adds:
 - per-sample quality flags and provenance;
 - adapters to the rest of the ecosystem.
 
-> **Status: pre-alpha (M2).** Pipelines select, clean, calibrate a stream
+> **Status: pre-alpha (M3).** Pipelines select, clean, calibrate a stream
 > against an intermittent reference, and impute gaps by length, from Python or
-> JSON specs, with fitted-pipeline persistence and synthetic test data. The API
-> may still change before 1.0. See [PLAN.md](PLAN.md) for the
+> JSON specs. Cleaned data goes into flex-pse models on their own time steps,
+> and is prepared for fitting surrogates. The API may still change before 1.0. See [PLAN.md](PLAN.md) for the
 > architecture and milestones.
 
 New here? The [tutorials](tutorials/) walk through the API from a first look
