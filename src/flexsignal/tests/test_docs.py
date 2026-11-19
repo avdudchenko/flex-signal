@@ -7,6 +7,8 @@ tutorials in ``tutorials/`` run as scripts. These tests are skipped when the doc
 or tutorials aren't present, e.g. from an installed wheel.
 """
 
+import ast
+import importlib.util
 import os
 import re
 import subprocess
@@ -32,6 +34,17 @@ PAGES = (
 PAGES_WITH_CODE = [p for p in PAGES if FENCE.search(p.read_text(encoding="utf-8"))]
 
 
+def _imported_modules(code: str) -> list[str]:
+    """The top-level modules a piece of code imports, in order."""
+    names: dict[str, None] = {}
+    for node in ast.walk(ast.parse(code)):
+        if isinstance(node, ast.Import):
+            names.update(dict.fromkeys(a.name.split(".")[0] for a in node.names))
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names[node.module.split(".")[0]] = None
+    return list(names)
+
+
 def _run(code: str, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-c", code],
@@ -48,8 +61,13 @@ def _run(code: str, cwd: Path) -> subprocess.CompletedProcess:
     "page", PAGES_WITH_CODE, ids=lambda p: f"{p.parent.name}/{p.stem}"
 )
 def test_page_code_runs(page, tmp_path):
-    blocks = FENCE.findall(page.read_text(encoding="utf-8"))
-    result = _run("\n\n".join(blocks), tmp_path)
+    code = "\n\n".join(FENCE.findall(page.read_text(encoding="utf-8")))
+    # A page that uses an optional library (flex-pse, pyomo, an extra) is
+    # skipped where it isn't installed; flex-signal's own imports never are.
+    for module in _imported_modules(code):
+        if module != "flexsignal" and importlib.util.find_spec(module) is None:
+            pytest.skip(f"{page.name} needs {module}, which isn't installed")
+    result = _run(code, tmp_path)
     assert result.returncode == 0, f"{page.name} failed:\n{result.stderr[-3000:]}"
 
 
