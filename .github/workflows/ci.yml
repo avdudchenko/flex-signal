@@ -50,11 +50,12 @@ jobs:
       matrix:
         # Full Python matrix on Linux; one representative version on
         # macOS/Windows to confirm cross-OS behavior (same policy as flex-pse).
-        # The ubuntu/3.13 entry is the single coverage run.
+        # Coverage is measured in the extras job, where every backend is
+        # installed, so adapter code isn't counted as untested.
         include:
           - { os: ubuntu-latest, python-version: "3.11" }
           - { os: ubuntu-latest, python-version: "3.12" }
-          - { os: ubuntu-latest, python-version: "3.13", coverage: true }
+          - { os: ubuntu-latest, python-version: "3.13" }
           - { os: ubuntu-latest, python-version: "3.14" }
           - { os: macos-latest, python-version: "3.13" }
           - { os: windows-latest, python-version: "3.13" }
@@ -69,21 +70,8 @@ jobs:
           cache-dependency-glob: pyproject.toml
       - run: uv pip install --system -e ".[dev]"
 
-      - name: Tests (unit + component, no coverage)
-        if: ${{ !matrix.coverage }}
+      - name: Tests (unit + component)
         run: pytest -n auto -m "unit or component"
-
-      # All tiers combined, one run. Per-subpackage coverage floors are added
-      # once M1 code exists (set at actual - 2%, as flex-pse does).
-      - name: Tests (all tiers, with coverage)
-        if: ${{ matrix.coverage }}
-        run: pytest -n auto --cov=flexsignal --cov-report=xml --cov-report=term
-      # The only Codecov upload; keep codecov.yml's after_n_builds in step.
-      - if: ${{ matrix.coverage }}
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          flags: unit
 
   integration:
     name: integration
@@ -128,10 +116,11 @@ jobs:
       - run: uv pip install --system "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@main"
       - run: pytest -m integration
 
-  # Every optional backend installed together ([all], PLAN.md M5), so the
-  # adapter tests run instead of skipping. CPU torch keeps the install small.
+  # Every optional backend installed together ([all]), with flex-pse, so the
+  # adapter and hand-off tests run instead of skipping. CPU torch keeps the
+  # install small. This is the coverage run: every tier, with a 90% floor.
   extras:
-    name: extras ([all])
+    name: extras ([all], coverage)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -145,9 +134,16 @@ jobs:
           cache-dependency-glob: pyproject.toml
       - run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
       - run: uv pip install --system -e ".[dev,tutorials,all]"
-      # The adapters, unit conversion, and the tutorials that need the extras
-      # (they skip in the integration job).
-      - run: pytest -n auto src/flexsignal/adapters src/flexsignal/core/tests/test_units.py "src/flexsignal/tests/test_docs.py::test_tutorial_runs_as_a_script"
+      - run: uv pip install --system "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@${FLEXPSE_REF}"
+      - name: Tests (all tiers, with coverage)
+        env:
+          MPLBACKEND: Agg
+        run: pytest -n auto --cov=flexsignal --cov-report=xml --cov-report=term --cov-fail-under=90
+      # The only Codecov upload; keep codecov.yml's after_n_builds in step.
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: unit
 
   t0:
     # [t0] can't share an environment with [pypots] (huggingface-hub >=1 vs <1),
