@@ -10,10 +10,22 @@ import pytest
 from flexsignal.core import SignalConfigError
 from flexsignal.integrations import flexpse as fsp
 
-pytest.importorskip("flexops")
+pyo = TimeBlock = None  # set by the fixture below, when a test runs
 
-import pyomo.environ as pyo  # noqa: E402
-from flexops.core.time_block import TimeBlock  # noqa: E402
+
+@pytest.fixture(autouse=True)
+def flexpse():
+    """Import flex-pse when a test runs, or skip without it.
+
+    Not at collection: importing flex-pse imports IDAES, and every pytest
+    worker collects every file, so a module-level import would make each
+    worker import IDAES at once, even with no flex-pse test to run.
+    """
+    global pyo, TimeBlock
+    pytest.importorskip("flexops")
+    import pyomo.environ as pyo
+    from flexops.core.time_block import TimeBlock
+
 
 TIME = {
     "kind": "time",

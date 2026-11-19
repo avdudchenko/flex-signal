@@ -3,8 +3,7 @@ from typing import Literal
 
 import pytest
 
-from flexsignal.core import SignalConfigError
-from flexsignal.core import registry
+from flexsignal.core import SignalConfigError, registry
 from flexsignal.core.registry import (
     STEP_ENTRY_POINT_GROUP,
     find_step,
