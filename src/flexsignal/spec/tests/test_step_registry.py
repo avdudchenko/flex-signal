@@ -1,3 +1,9 @@
+"""The step registry in flexsignal.core, with step classes built on StepSpec.
+
+These live with the spec tests because StepSpec is in the spec layer, which
+sits above core: tests inside core may not import it (see .importlinter).
+"""
+
 import types
 from typing import Literal
 
