@@ -254,6 +254,43 @@ def test_raw_data_to_a_solved_model_and_a_fitted_regressor(flexpse):
     assert scores["rmse"] < 0.05
 
 
+@pytest.mark.integration
+def test_a_forecast_is_fixed_into_a_model_and_solved(flexpse):
+    """M4 acceptance: tomorrow's forecast flow → the model's grid → fixed → solved."""
+    pyo, build_model = flexpse
+    pytest.importorskip("highspy")
+    # A week of data, 6-12 January; the model is the next day, 13 January.
+    case = synthetic.plant(seed=4).with_spikes("flow", count=6)
+    pipe = fs.Pipeline(name="flow_forecast")
+    pipe.add_step(fs.clean.Hampel("flow", window="1h", n_sigma=6, min_scale=1.0))
+    pipe.add_step(fs.select.Resample(freq="1h"))
+    pipe.add_step(
+        fs.forecast.Structural(
+            "flow", horizon="1D", seasonal=[{"period": "1D", "harmonics": 2}]
+        )
+    )
+    forecast = fs.run(pipe.spec, case.signal()).signal
+    spec = copy.deepcopy(SPEC)
+    spec["elements"][0].update(start_date="2025-01-13", end_date="2025-01-14")
+    values = to_grid(
+        forecast, fsp.time_grid(spec), GridOptions(timezone="UTC"), columns=["flow"]
+    )
+    assert values.estimated["flow"] == 24  # every hour rests on the forecast
+    model = build_model(
+        fsp.apply_values(
+            spec, values.to_overrides(rename={"flow": "site.pump.flow_in"})
+        )
+    )
+    result = pyo.SolverFactory("appsi_highs").solve(model)
+    assert str(result.solver.termination_condition) == "optimal"
+    fixed = [pyo.value(model.site.pump.flow_in[t]) for t in model.site.pump.flow_in]
+    # The same plant one day longer gives the true flow on the model's day. With a
+    # week of data the model has no weekly cycle, so it drifts a few m^3/h by night.
+    day = synthetic.plant(seed=4, periods=8 * 288).underlying["flow"]
+    truth = day.resample("1h").mean().loc["2025-01-13"].to_numpy()
+    assert np.abs(np.array(fixed) - truth).max() < 5.0
+
+
 @pytest.mark.unit
 def test_without_flexpse_the_error_says_how_to_install_it(monkeypatch):
     monkeypatch.setitem(sys.modules, "flexops", None)  # import flexops now fails

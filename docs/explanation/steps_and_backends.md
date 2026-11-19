@@ -37,10 +37,11 @@ In Python, `get_backend` also accepts any `"package.module:attribute"` string, w
 in. Spec fields don't: a step's `model` must be one of the keys it lists, because loading a spec must never import
 code. You can register keys of your own with {func}`~flexsignal.backends.register_backend`, or through the
 `flexsignal.backends` entry-point group, and use them from [your own steps](#adding-your-own-step) with
-`get_backend`. The built-in steps don't accept registered keys yet: `calibrate` and `regression` take only the
-models they list, and `interpolate` only its fixed methods. M5 adds a simpler route: register a plain function as a
-cleaner, imputer, forecaster or model, and use it by name from Python or a JSON spec. Only registered methods can
-run, so a spec still can't make flex-signal import code.
+`get_backend`. The built-in steps don't accept arbitrary keys: `calibrate` and `regression` take the models they
+list or a model registered with {func}`~flexsignal.register_model`, and `interpolate` only its fixed methods. The
+simpler route to a method of your own is to register a plain function as a cleaner, imputer, forecaster or model,
+and use it by name from Python or a JSON spec ([Your own methods](extending.md)). Only registered methods can run,
+so a spec still can't make flex-signal import code.
 
 ```{eval-rst}
 .. flexsignal-backend-table::
@@ -69,4 +70,5 @@ class Negative(StreamStep):
 ```
 
 A step from another package is registered through the `flexsignal.steps` entry-point group, so specs that use
-it load wherever the package is installed.
+it load wherever the package is installed. For most methods, registering a plain function is simpler: see
+[Your own methods](extending.md).

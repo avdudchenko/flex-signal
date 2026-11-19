@@ -76,3 +76,17 @@ The step registry
 .. autofunction:: get_step_class
 
 .. autofunction:: registered_steps
+
+.. autofunction:: own_steps
+
+.. autofunction:: find_step
+
+.. autofunction:: unregister_step
+
+Units
+-----
+
+.. automodule:: flexsignal.core.units
+   :no-members:
+
+.. autofunction:: flexsignal.core.units.convert

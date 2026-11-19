@@ -27,15 +27,15 @@ from pydantic import Field, field_validator, model_validator
 
 from flexsignal.backends import get_backend
 from flexsignal.backends.models import (
-    LINEAR_MODELS,
     check_model_key,
     fit_linear,
+    is_linear_model,
     predict_linear,
 )
 from flexsignal.core.exceptions import SignalConfigError, SignalDataError
 from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
-from flexsignal.core.registry import get_step_class, register_step
+from flexsignal.core.registry import find_step, get_step_class, register_step
 from flexsignal.spec.models import (
     Duration,
     SignedDuration,
@@ -319,7 +319,7 @@ class Regression(_GapImputer):
     @classmethod
     def _linear_model(cls, value: str) -> str:
         check_model_key(value)
-        if value not in LINEAR_MODELS:
+        if not is_linear_model(value):
             raise ValueError(f"regression needs a linear model, not {value!r}")
         return value
 
@@ -485,13 +485,30 @@ class ImputeTier(StrictModel):
             "every gap left."
         )
     )
-    method: Literal[_TIER_METHODS] = Field(  # type: ignore[valid-type]
-        description="interpolate, kalman, regression, knn or iterative."
+    method: str = Field(
+        description=(
+            "interpolate, kalman, regression, knn, iterative, or the name of a "
+            "registered imputer."
+        )
     )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="The method's other options, e.g. {method: pchip}.",
     )
+
+    @field_validator("method")
+    @classmethod
+    def _known_method(cls, value: str) -> str:
+        if value in _TIER_METHODS:
+            return value
+        step = find_step(value)
+        method = getattr(step, "registered", None)
+        if getattr(method, "role", None) == "imputer":
+            return value
+        raise ValueError(
+            f"unknown tier method {value!r}; use one of {list(_TIER_METHODS)} or the "
+            "name of a registered imputer (fs.register_imputer)"
+        )
 
 
 @register_step
@@ -572,3 +589,15 @@ class Tiered(StreamStep):
 def tier_methods() -> Sequence[str]:
     """Return the methods a tier may use."""
     return _TIER_METHODS
+
+
+def __getattr__(name: str) -> type:
+    """Return the registered imputer called ``name`` (a registered method)."""
+    if name.startswith("_"):
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from flexsignal.steps.registered import registered_class
+
+    cls = registered_class("imputer", name)
+    if cls is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return cls

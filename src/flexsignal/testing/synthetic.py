@@ -1,7 +1,7 @@
 """Seeded, plant-like synthetic data with known injected faults.
 
-This is flex-signal's main source of test, example and benchmark data (PLAN.md
-§8, "Test data"). Every case keeps three things:
+This is flex-signal's main source of test, example and benchmark data. Every
+case keeps three things:
 
 - the underlying noise-free signal (``underlying``);
 - the fault-free measurement (``clean``: the signal plus sensor noise);
@@ -364,7 +364,7 @@ def abcd(
     d_blocks: int = 14,
     reference_bias: float = 20.0,
 ) -> SyntheticCase:
-    """Generate the A/B/C/D calibration problem (PLAN.md §3.5).
+    """Generate the A/B/C/D calibration problem.
 
     The streams:
 

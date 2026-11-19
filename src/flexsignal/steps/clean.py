@@ -25,6 +25,7 @@ from flexsignal.core.exceptions import SignalConfigError, SignalDataError
 from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
 from flexsignal.core.registry import register_step
+from flexsignal.core.units import convert
 from flexsignal.spec.models import Duration, Quantity, to_timedelta
 from flexsignal.steps._base import (
     StreamStep,
@@ -53,14 +54,20 @@ normal data. A fixed conversion, not a setting; tune ``Hampel.n_sigma`` instead.
 def _bound(value: float | Quantity | None, units: str | None, stream: str, field: str):
     if value is None or isinstance(value, float | int):
         return value
-    if value.units != units:
+    if value.units == units:
+        return value.value
+    if not units:
         raise SignalConfigError(
-            f"{field} is given in {value.units!r} but stream {stream!r} is in "
-            f"{units!r}. Give the bound in the stream's units (unit conversion "
-            "arrives with the [units] extra).",
+            f"{field} is given in {value.units!r} but stream {stream!r} has no "
+            "units; give the bound as a plain number, or set the stream's units.",
             field=field,
         )
-    return value.value
+    try:
+        return convert(value.value, value.units, units)
+    except SignalConfigError as exc:
+        raise SignalConfigError(
+            f"{field}: {exc.message} (stream {stream!r} is in {units!r}).", field=field
+        ) from None
 
 
 @register_step
@@ -486,3 +493,15 @@ class Detotalize(StreamStep):
             if self.units is not None:
                 meta[col] = meta[col].model_copy(update={"units": self.units})
         return sf.evolve(values=values, flags=flags, meta=meta)
+
+
+def __getattr__(name: str) -> type:
+    """Return the registered cleaner called ``name`` (a registered method)."""
+    if name.startswith("_"):
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from flexsignal.steps.registered import registered_class
+
+    cls = registered_class("cleaner", name)
+    if cls is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return cls

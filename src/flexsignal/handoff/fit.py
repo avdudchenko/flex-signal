@@ -10,7 +10,7 @@ every run.
 flex-signal stops at the prepared ``X, y``: pass them to a regressor yourself,
 e.g. flex-pse's ``LinearRegressor().fit(X, y, input_units=fit.input_units,
 output_units=fit.output_units)``. (Moved from flex-orchestrator,
-unchanged; PLAN.md D22.)
+unchanged.)
 """
 
 from __future__ import annotations

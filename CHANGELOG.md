@@ -7,6 +7,77 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Your own methods (M5).** `fs.register_cleaner`, `fs.register_imputer` and `fs.register_forecaster` turn a plain
+  function into a step that runs from Python, from a JSON spec, in a `tiered` imputer and in a backtest, and saves
+  as part of a fitted pipeline. The function's keyword-only parameters become validated options (type hints,
+  defaults, `Annotated` constraints, `Literal` allowlists; the `Args:` docstring gives the descriptions); flex-signal
+  does the gaps, flags, issue time and quantile streams. `fit=` learns a JSON state. `fs.register_model` makes a
+  scikit-learn-style regressor a `model` for `calibrate` and `regression`.
+  - Only registered methods run: a spec names a method, never an import path, and loading a spec never imports
+    anything. An unknown kind fails on load with "register it first"; a spec's new `requires` list is only a hint
+    for that message.
+  - `fs.load_plugins(...)`, and `plugins=` on `fs.run`, `fs.fit` and `FittedPipeline.load`; installed packages
+    register through the `flexsignal.steps` entry-point group.
+  - History records of a registered step name the function, its module and its package's version.
+- **Adapters (M5)**, registered through the same functions and imported only when a step runs:
+  - `[anomaly]`: `PyodDetector` (pyod detectors), `RupturesChangepoint` (short level glitches between change
+    points), `StumpyDiscord` (matrix-profile discords).
+  - `[pypots]`: `PypotsImpute` (SAITS, BRITS, CSDI, TimesNet) and `PypotsForecast` (DLinear, TimesNet,
+    Transformer, TEFN, CSDI), with `to_windows` / `from_windows` windowing that restores the index.
+  - `[foundation]`: `ChronosForecast`, zero-shot Chronos-2 at a pinned revision, with native quantiles and exog as
+    covariates; TimesFM 2.5 is accepted too.
+  - `[t0]`: `T0Forecast`, zero-shot t0-alpha (The Forecasting Company) at a pinned revision, with exog as
+    covariates. It can't be installed alongside `[pypots]` (huggingface-hub ≥1 against <1), so `[all]` leaves
+    it out.
+  - Only models with open (Apache-2.0) weights have adapters; those whose licences restrict commercial use
+    are the user's to register (PLAN.md D29).
+  - `[deep]`: `NeuralforecastForecast` (NHITS, NBEATS, NBEATSx, MLP, LSTM, TiDE, PatchTST, DLinear).
+  - `[darts]`: `DartsForecast`; `[sktime]`: `SktimeForecast`. Both with exog and intervals where the model has them.
+  - Learned models train on the data they are given and store nothing (PLAN.md D26).
+  - Every adapter's model option takes any of the library's model classes by name, not only the tested ones
+    (PyPOTS, neuralforecast, darts, sktime, pyod detectors, ruptures searches). Untested models get their own
+    settings from `params`, and an error names any required setting still missing. A model is looked up only
+    among the library's own models; a spec still never names an import path (PLAN.md D30).
+- **Units (M5).** `convert_units` converts streams with pint (`[units]`), and a `range` bound may be given in other
+  units. `flexsignal.core.units.convert`.
+- `[all]` installs every backend extra; a CI job runs the adapter tests with it.
+- **Included methods** reference page: every cleaner, imputer and forecaster, its `fs.` call, JSON kind, extra
+  and links to the library docs, generated from the code; and how to reach a library's untested models.
+- **Docs and tutorials (M5).** Explanation *Your own methods*, how-to *Add your own method*, an adapters section
+  in the step reference (registered methods marked as such in the tables), tutorial 09 (deep imputation and
+  forecasting against the core methods) and tutorial 10 (your own methods).
+
+### Changed
+
+- The `tiered` imputer's `method` accepts a registered imputer's name.
+- A forecast step's quantiles may come from the method itself (`{q: values}`), not only from a standard deviation.
+
+- **Forecasting (M4).** `fs.forecast` steps predict a stream's future values and write them into the frame's future
+  rows, extending the index on the data's step. The rows are flagged `FORECAST`, the target's metadata records the
+  `issue_time` (default: the last time the target has a value), and `quantiles` add `<stream>__q10`-style streams.
+  `exog` streams are known ahead (their future rows are in the input).
+  - `Persistence` and `SeasonalNaive`: the baselines.
+  - `Structural`: statsmodels' `UnobservedComponents` (level or trend, seasonal cycles, an AR term, `exog`), its
+    parameters fitted once and stored as JSON, its intervals from the forecast variance.
+  - `Regression`: a linear model of Fourier cycles, `exog`, the target's lags (forecast step by step) and `past`
+    streams at lags no shorter than the horizon.
+
+  Their spec kinds are `forecast_persistence`, `forecast_seasonal_naive`, `forecast_structural` and
+  `forecast_regression`.
+- **Backtests (M4).** `fs.backtest(spec, data, folds=..., compare=[...])` issues the pipeline's forecast at blocked,
+  time-ordered times in the data's past. Each fold hides every stream except `exog` after its issue time, fits and
+  runs the whole pipeline, and scores the forecast (RMSE, MAE, MAPE, interval coverage). `compare` swaps baselines
+  or other forecasters into the same pipeline; `BacktestResult.summary()` adds skill against the baseline.
+- `StreamMeta.issue_time`, and `GridValues.estimated` now also counts steps resting on forecast values. A forecast
+  reaches a flex-pse model as fixed values, through `to_grid` and `apply_values` (PLAN.md D24).
+- **Docs and tutorial (M4).** An explanation page on forecasting and backtesting, a how-to guide to forecast and
+  backtest, and tutorial 08.
+
+### Not included
+
+- skforecast, statsforecast and mlforecast adapters (`[ml]`, `[nixtla]`): they require `pandas<3`, and flex-signal
+  and flex-pse require pandas 3 (PLAN.md D23, O2).
+
 - **Hand-off to models (M3).** `flexsignal.handoff` turns cleaned data into what a model needs, with no model
   library imported:
   - `to_grid(data, grid, options)` gives one value per model time step: UTC to the facility's `timezone`,

@@ -4,7 +4,7 @@ Pipelines and entry points
 Running a spec
 --------------
 
-These are the entry points flex-orchestrator will wrap (see PLAN.md §4.3): a
+These are the entry points flex-orchestrator will wrap: a
 spec goes in and a JSON-able result comes out, with no file I/O when data is
 passed in.
 

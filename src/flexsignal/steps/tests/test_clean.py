@@ -141,12 +141,17 @@ def test_cleaners_leave_missing_values_and_other_streams_alone():
 
 
 @pytest.mark.unit
-def test_range_quantity_units_must_match():
+def test_range_quantity_bounds_are_converted_to_the_streams_units():
+    pytest.importorskip("pint")
     sf = synthetic.plant().signal()
-    out = _run(fs.clean.Range("flow", max={"value": 50, "units": "m^3/hr"}), sf)
-    assert _flagged(out, Flag.OUT_OF_RANGE).any()
-    with pytest.raises(SignalConfigError, match="stream's units"):
-        _run(fs.clean.Range("flow", max={"value": 50, "units": "L/s"}), sf)
+    same = _run(fs.clean.Range("flow", max={"value": 50, "units": "m^3/hr"}), sf)
+    assert _flagged(same, Flag.OUT_OF_RANGE).any()
+    # 25 L/s is 90 m^3/hr.
+    in_litres = _run(fs.clean.Range("flow", max={"value": 25, "units": "L/s"}), sf)
+    in_hours = _run(fs.clean.Range("flow", max=90.0), sf)
+    pd.testing.assert_frame_equal(in_litres.flags, in_hours.flags)
+    with pytest.raises(SignalConfigError, match="can't convert"):
+        _run(fs.clean.Range("flow", max={"value": 50, "units": "kW"}), sf)
 
 
 @pytest.mark.unit

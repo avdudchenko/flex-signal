@@ -11,13 +11,8 @@ impute_gaps
 evaluate_imputers
 apply_to_a_flexpse_model
 prepare_fit_data
+forecast_and_backtest
+add_your_own_method
 save_and_load_a_fitted_pipeline
 ```
 
-Each future guide arrives with the milestone that builds the feature it uses:
-
-| Guide | Milestone |
-|---|---|
-| Forecast and backtest | M4 |
-| Add your own cleaning, imputation or forecasting method | M5 |
-| Deploy a pipeline as an Acquirium App | M7 |

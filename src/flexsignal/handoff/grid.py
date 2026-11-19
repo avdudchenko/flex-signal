@@ -15,7 +15,7 @@ plus a day either side, so a gap at either end can be interpolated from the
 samples beyond it.
 
 This is flex-orchestrator's ``model_inputs`` alignment, moved here so a plain
-script can use it (PLAN.md D22); its behaviour, error messages and hashes are
+script can use it; its behaviour, error messages and hashes are
 unchanged.
 """
 
@@ -39,7 +39,9 @@ __all__ = ["GridValues", "data_window", "to_grid", "values_hash"]
 MARGIN = pd.Timedelta(days=1)
 """How far past each end of the horizon data is read, so end gaps can be filled."""
 
-_ESTIMATED = int(Flag.IMPUTED_SHORT | Flag.IMPUTED_MODEL | Flag.CORRECTED)
+_ESTIMATED = int(
+    Flag.IMPUTED_SHORT | Flag.IMPUTED_MODEL | Flag.CORRECTED | Flag.FORECAST
+)
 
 
 @dataclass
@@ -54,8 +56,9 @@ class GridValues:
         filled: ``{column: time steps that had no value before the gap rule}``;
             empty with ``reduce``.
         estimated: ``{column: time steps whose value draws on samples flex-signal
-            filled or corrected}`` (flags ``IMPUTED_SHORT``, ``IMPUTED_MODEL``,
-            ``CORRECTED``). Zero for data without flags.
+            filled, corrected or forecast}`` (flags ``IMPUTED_SHORT``,
+            ``IMPUTED_MODEL``, ``CORRECTED``, ``FORECAST``). Zero for data without
+            flags.
         window: The data read, in the facility's time: ``{"start", "end"}``, or
             None for a model without a time axis.
         timezone: The facility's time zone.

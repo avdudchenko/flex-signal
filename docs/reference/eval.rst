@@ -13,3 +13,16 @@ Evaluation
 .. autofunction:: summarize
 
 .. autofunction:: metrics
+
+Backtests
+---------
+
+.. automodule:: flexsignal.eval.backtesting
+   :no-members:
+
+.. currentmodule:: flexsignal.eval
+
+.. autofunction:: backtest
+
+.. autoclass:: BacktestResult
+   :members: summary, to_dict

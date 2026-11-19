@@ -21,7 +21,7 @@ flex-pse
 Acquirium
 ---------
 
-The Acquirium integration is a placeholder until M7.
+The Acquirium integration is a placeholder.
 
 .. automodule:: flexsignal.integrations.acquirium
    :no-members:

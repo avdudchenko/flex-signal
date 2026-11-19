@@ -1,13 +1,14 @@
 """Ready-made example steps, for tests and docs.
 
 The spec tests check that :func:`one_of_every_step` covers every registered step
-kind, so adding a step kind means adding an example here.
+kind flex-signal provides (built in or an adapter), so adding one means adding an
+example here.
 """
 
 from __future__ import annotations
 
 from flexsignal.spec import Quantity, StepSpec
-from flexsignal.steps import clean, correct, impute, select
+from flexsignal.steps import clean, correct, forecast, impute, select
 
 __all__ = ["one_of_every_step"]
 
@@ -24,6 +25,7 @@ def one_of_every_step() -> list[StepSpec]:
         select.Window(start="2025-01-06", end="2025-01-08T12:00:00Z"),
         select.Mask(keep_when="pump_on == 1", streams=["flow"]),
         select.Rename(mapping={"temperature": "temp"}),
+        select.ConvertUnits("flow", to="L/s"),
         select.Combine(output="flow_best", streams=["reference_flow", "flow"]),
         select.Shift("pressure", by="-15min"),
         clean.Range("flow", min=0.0, max=Quantity(value=500, units="m^3/hr")),
@@ -69,4 +71,39 @@ def one_of_every_step() -> list[StepSpec]:
                 },
             ],
         ),
+        forecast.Persistence("flow", horizon="1h", quantiles=[0.1, 0.9]),
+        forecast.SeasonalNaive(
+            "flow", horizon="6h", season="1D", issue_time="2025-01-08T00:00:00Z"
+        ),
+        forecast.Structural(
+            "flow",
+            horizon="6h",
+            level="local_linear_trend",
+            seasonal=[{"period": "1D", "harmonics": 2}],
+            autoregressive=1,
+            exog=["temperature"],
+            quantiles=[0.05, 0.5, 0.95],
+        ),
+        forecast.Regression(
+            "flow",
+            horizon="1h",
+            fourier=[{"period": "1D", "harmonics": 2}],
+            lags=["5min", "1D"],
+            past=["pressure"],
+            past_lags=["1h"],
+            exog=["temperature"],
+            model="statsmodels:OLS",
+            name="flow_ahead",
+        ),
+        # flex-signal's adapters: registered methods, built the same way.
+        clean.PyodDetector("flow", model="ECOD", contamination=0.02),
+        clean.RupturesChangepoint("flow", max_segment="1h"),
+        clean.StumpyDiscord("flow", window="2h", k=8.0),
+        impute.PypotsImpute("flow", model="BRITS", features=["pressure"], max_gap="6h"),
+        forecast.PypotsForecast("flow", horizon="6h", model="TimesNet"),
+        forecast.ChronosForecast("flow", horizon="1D", context="7D"),
+        forecast.T0Forecast("flow", horizon="1D", context="7D"),
+        forecast.NeuralforecastForecast("flow", horizon="1D", model="MLP"),
+        forecast.DartsForecast("flow", horizon="1D", model="Theta"),
+        forecast.SktimeForecast("flow", horizon="1D", model="AutoETS"),
     ]

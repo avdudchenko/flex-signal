@@ -13,12 +13,7 @@ conditions
 calibration
 imputation_tiers
 flexpse_integration
+forecasting_and_backtesting
+extending
 ```
 
-Each future page arrives with the milestone that builds the feature it describes:
-
-| Page | What it covers | Milestone |
-|---|---|---|
-| Forecasting and backtesting | Forecast issue times, exogenous inputs, blocked backtests | M4 |
-| The orchestrator contract | The API rules flex-orchestrator's wrapper relies on | M6 |
-| Acquirium integration | Reading streams, writing results, `PipelineApp` | M7 |

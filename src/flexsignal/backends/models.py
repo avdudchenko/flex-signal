@@ -41,14 +41,86 @@ CURVE_FIT = "scipy:curve_fit"
 """Key for fitting a formula's parameters with :func:`scipy.optimize.curve_fit`."""
 
 
+_REGISTERED: dict[str, tuple[type, str]] = {}
+
+
+def register_model(name: str, cls: type, *, description: str = "") -> str:
+    """Make a regressor of your own a ``model`` for ``calibrate`` and ``regression``.
+
+    The class must work like a scikit-learn regressor: ``cls(**params).fit(X, y)``,
+    after which ``coef_`` and ``intercept_`` describe the fitted model,
+    ``y = intercept_ + X @ coef_``. Only those numbers are kept, so the fitted
+    state stays JSON and applying it needs only numpy.
+
+    Args:
+        name: The name a spec's ``model`` field uses, e.g. ``"PlantRidge"``. A
+            Python identifier.
+        cls: The regressor class.
+        description: One line on what it is, for the docs.
+
+    Returns:
+        ``name``.
+
+    Raises:
+        SignalConfigError: If the name isn't an identifier, the class has no
+            ``fit``, or another class is already registered under the name.
+    """
+    if not name.isidentifier():
+        raise SignalConfigError(
+            f"model name {name!r} must be a Python identifier, e.g. PlantRidge.",
+            value=name,
+        )
+    if not callable(getattr(cls, "fit", None)):
+        raise SignalConfigError(
+            f"{cls!r} has no fit(X, y) method; register a regressor class that works "
+            "like scikit-learn's.",
+            value=name,
+        )
+    existing = _REGISTERED.get(name)
+    if existing is not None and _qualified(existing[0]) != _qualified(cls):
+        raise SignalConfigError(
+            f"model {name!r} is already registered for {_qualified(existing[0])}; "
+            "pick another name.",
+            value=name,
+        )
+    _REGISTERED[name] = (cls, description)
+    return name
+
+
+def _qualified(cls: type) -> str:
+    return f"{cls.__module__}.{cls.__qualname__}"
+
+
+def unregister_model(name: str) -> None:
+    """Remove a registered model if it is registered (for tests and notebooks)."""
+    _REGISTERED.pop(name, None)
+
+
+def registered_models() -> dict[str, str]:
+    """Return the models registered with :func:`register_model`, with descriptions."""
+    return {k: v[1] for k, v in sorted(_REGISTERED.items())}
+
+
+def registered_model_class(name: str) -> type | None:
+    """Return the class registered under ``name``, or None."""
+    entry = _REGISTERED.get(name)
+    return entry[0] if entry is not None else None
+
+
+def is_linear_model(key: str) -> bool:
+    """Return True if ``key`` is a built-in linear model or a registered one."""
+    return key in LINEAR_MODELS or key in _REGISTERED
+
+
 def check_model_key(key: str) -> str:
     """Return ``key`` if it names an accepted model, else raise ValueError."""
-    if key in LINEAR_MODELS or key == CURVE_FIT:
+    if is_linear_model(key) or key == CURVE_FIT:
         return key
-    known = ", ".join([*LINEAR_MODELS, CURVE_FIT])
+    known = ", ".join([*LINEAR_MODELS, CURVE_FIT, *_REGISTERED])
     raise ValueError(
-        f"unknown model {key!r}. Use one of: {known}. Specs can't name other "
-        "classes, because loading a spec must never import code."
+        f"unknown model {key!r}. Use one of: {known}, or register your own with "
+        "fs.register_model. Specs can't name other classes, because loading a spec "
+        "must never import code."
     )
 
 
@@ -61,7 +133,8 @@ def fit_linear(
     """Fit a linear model and return its coefficients.
 
     Args:
-        key: One of :data:`LINEAR_MODELS`.
+        key: One of :data:`LINEAR_MODELS`, or a model registered with
+            :func:`~flexsignal.register_model`.
         X: Inputs, shape ``(n_rows, n_features)``, with no NaN.
         y: Targets, shape ``(n_rows,)``, with no NaN.
         params: Keyword arguments for the model's constructor, e.g.
@@ -82,10 +155,20 @@ def fit_linear(
             f"only {len(y)} rows to fit {X.shape[1] + 1} coefficients; widen the "
             "training data or relax the fit condition."
         )
-    cls = get_backend(key)
+    registered = _REGISTERED.get(key)
+    cls = registered[0] if registered is not None else get_backend(key)
     params = dict(params or {})
     try:
-        if key.startswith("sklearn:"):
+        if registered is not None:
+            model = cls(**params).fit(X, y)
+            if not hasattr(model, "coef_") or not hasattr(model, "intercept_"):
+                raise SignalConfigError(
+                    f"model {key!r} has no coef_ and intercept_ after fit(); "
+                    "register a regressor whose fitted coefficients describe it."
+                )
+            intercept = float(np.ravel(model.intercept_)[0])
+            coef = np.ravel(model.coef_)
+        elif key.startswith("sklearn:"):
             if key == "sklearn:TheilSenRegressor":
                 params.setdefault("random_state", 0)
             model = cls(**params).fit(X, y)

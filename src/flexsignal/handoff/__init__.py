@@ -10,7 +10,7 @@
 
 Nothing here imports a model library. Turning values into flex-pse elements is
 :mod:`flexsignal.integrations.flexpse`. These functions came from
-flex-orchestrator, which now calls them (PLAN.md D22).
+flex-orchestrator, which now calls them.
 """
 
 from flexsignal.handoff.fit import FitData, data_hash, fit_data, split_holdout

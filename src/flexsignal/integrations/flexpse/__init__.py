@@ -10,9 +10,9 @@ Values come from :func:`flexsignal.handoff.to_grid`, via
 
 flex-pse imports flex-signal, never the reverse at import time: this is the only
 module allowed to touch flex-pse, pyomo or idaes, and it imports them inside
-functions, so ``import flexsignal`` stays light. Install flex-pse with the
-``flexpse`` extra (it is installed from its git tag until it is on PyPI). These
-functions came from flex-orchestrator, which now calls them (PLAN.md D22).
+functions, so ``import flexsignal`` stays light. flex-pse isn't on PyPI
+yet: install its latest release from its git tag. These
+functions came from flex-orchestrator, which now calls them.
 """
 
 from __future__ import annotations

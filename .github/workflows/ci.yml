@@ -128,6 +128,46 @@ jobs:
       - run: uv pip install --system "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@main"
       - run: pytest -m integration
 
+  # Every optional backend installed together ([all], PLAN.md M5), so the
+  # adapter tests run instead of skipping. CPU torch keeps the install small.
+  extras:
+    name: extras ([all])
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
+      - run: uv pip install --system -e ".[dev,tutorials,all]"
+      # The adapters, unit conversion, and the tutorials that need the extras
+      # (they skip in the integration job).
+      - run: pytest -n auto src/flexsignal/adapters src/flexsignal/core/tests/test_units.py "src/flexsignal/tests/test_docs.py::test_tutorial_runs_as_a_script"
+
+  t0:
+    # [t0] can't share an environment with [pypots] (huggingface-hub >=1 vs <1),
+    # so t0-alpha gets its own job, with [foundation] for comparison.
+    name: extras ([t0])
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - run: uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
+      - run: uv pip install --system -e ".[dev,foundation,t0]"
+      - run: pytest src/flexsignal/adapters/tests/test_foundation.py
+
   build-wheel:
     name: build-wheel
     runs-on: ubuntu-latest

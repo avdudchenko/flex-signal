@@ -77,8 +77,12 @@ def test_tutorial_runs_as_a_script(tutorial, tmp_path):
     # it checks what it teaches, not only that it doesn't crash.
     pytest.importorskip("marimo", reason="needs the tutorials extra")
     pytest.importorskip("matplotlib", reason="needs the tutorials extra")
-    if "from flexops" in tutorial.read_text(encoding="utf-8"):
+    text = tutorial.read_text(encoding="utf-8")
+    if "from flexops" in text:
         pytest.importorskip("flexops", reason="needs flex-pse (see installation)")
+    # A tutorial that needs optional extras says so, e.g. "# needs-module: pypots".
+    for module in re.findall(r"^\s*# needs-module: (\S+)", text, re.M):
+        pytest.importorskip(module, reason=f"needs {module} (see the tutorial)")
     result = subprocess.run(
         [sys.executable, str(tutorial)],
         cwd=tmp_path,
@@ -117,3 +121,33 @@ def test_generated_tables_match_the_registries(monkeypatch):
     assert fields["``n_sigma``"][2] == "``3.0``"
     assert len(flexsignaldoc.collect_flag_rows()) == len(FLAG_DESCRIPTIONS)
     assert len(flexsignaldoc.collect_backend_rows()) == len(registered_backends())
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not DOCS.exists(), reason="docs not present")
+def test_every_included_method_is_in_the_methods_page(monkeypatch):
+    pytest.importorskip("docutils")
+    monkeypatch.syspath_prepend(str(DOCS / "_ext"))
+    import flexsignaldoc
+
+    from flexsignal.core.registry import own_steps
+
+    shipped = {
+        kind for kind, cls in own_steps().items() if flexsignaldoc.method_group(cls)
+    }
+    listed = {kind for group in flexsignaldoc.METHODS.values() for kind in group}
+    assert shipped == listed, (shipped - listed, listed - shipped)
+    for group, methods in flexsignaldoc.METHODS.items():
+        rows = flexsignaldoc.collect_method_rows(group)
+        assert len(rows) == len(methods)
+        for _, patterns in methods.values():
+            for pattern in patterns:  # every library link resolves
+                assert flexsignaldoc._backend_keys(pattern), pattern
+    pyod = {row[2]: row for row in flexsignaldoc.collect_method_rows("clean")}
+    assert "pyod.readthedocs.io" in pyod["``PyodDetector``"][4]
+    assert pyod["``hampel``"][4] == "flex-signal (no external library)"
+    from flexsignal.adapters._common import MODEL_OPTIONS
+
+    models = flexsignaldoc.collect_model_rows()
+    assert len(models) == len(MODEL_OPTIONS) > 0
+    assert all("https://" in row[3] for row in models)

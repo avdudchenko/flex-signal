@@ -30,23 +30,25 @@ environment.
 
 ## Optional extras
 
-Each heavy or specialised library is an optional extra, added in the milestone whose code uses it. Only
-`tutorials` exists so far: everything up to M2, including the calibration models, the Kalman, regression, k-NN and
-iterative imputers and the imputer benchmark, uses the core dependencies.
+Each heavy or specialised library is an optional extra. Everything else, including the calibration models, the
+Kalman, regression, k-NN and iterative imputers, the forecasters, the imputer benchmark and backtesting, uses the
+core dependencies. A missing extra is reported by name when a step that needs it runs.
 
-| Extra | Contents | Milestone |
-|---|---|---|
-| `tutorials` | marimo (pinned) and matplotlib, to run the [tutorials](../tutorials/index.md) | M1 |
-| flex-pse | The latest flex-pse release (0.3.1 today), for `flexsignal.integrations.flexpse` and tutorial 07. Not on PyPI yet, so install it from its git tag (below); `environment.yml` already does | M3 |
-| `ml` | skforecast, lightgbm | M4 |
-| `nixtla` | statsforecast, mlforecast | M4 |
-| `pypots` | PyPOTS deep imputation and forecasting, with pygrinder missing-data patterns | M5 |
-| `deep` | neuralforecast | M5 |
-| `foundation` | Chronos-2 zero-shot forecasting | M5 |
-| `anomaly` | pyod, ruptures, stumpy | M5 |
-| `darts`, `sktime` | Adapters to the darts and sktime model zoos | M5 |
-| `units` | pint, pint-pandas | M5 |
-| `acquirium` | Acquirium client | M7 |
+| Extra | Contents |
+|---|---|
+| `tutorials` | marimo (pinned) and matplotlib, to run the [tutorials](../tutorials/index.md) |
+| `units` | pint, for `convert_units` and `range` bounds in other units |
+| `anomaly` | pyod, ruptures and stumpy cleaners |
+| `pypots` | PyPOTS deep imputation and forecasting, with pygrinder |
+| `foundation` | Chronos-2 zero-shot forecasting |
+| `t0` | t0-alpha zero-shot forecasting. Can't be installed alongside `pypots` |
+| `deep` | neuralforecast |
+| `darts`, `sktime` | Adapters to the darts and sktime model zoos |
+| `all` | Every extra above except `tutorials` and `t0` |
+| flex-pse | The latest flex-pse release (0.3.1 today), for `flexsignal.integrations.flexpse` and tutorial 07. Not on PyPI yet, so install it from its git tag (below); `environment.yml` already does |
+
+Deep-learning extras pull in PyTorch. For a CPU-only install, put CPU torch in first:
+`pip install torch --index-url https://download.pytorch.org/whl/cpu`.
 
 ## flex-pse
 

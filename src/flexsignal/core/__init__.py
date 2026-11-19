@@ -37,9 +37,12 @@ from flexsignal.core.frame import (
 from flexsignal.core.meta import StreamMeta
 from flexsignal.core.registry import (
     STEP_ENTRY_POINT_GROUP,
+    find_step,
     get_step_class,
+    own_steps,
     register_step,
     registered_steps,
+    unregister_step,
 )
 
 __all__ = [
@@ -65,9 +68,12 @@ __all__ = [
     "evaluate_condition",
     "evaluate_formula",
     "flag_names",
+    "find_step",
     "get_step_class",
+    "own_steps",
     "local_timezone",
     "parse_flags",
     "register_step",
     "registered_steps",
+    "unregister_step",
 ]

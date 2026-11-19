@@ -16,7 +16,7 @@ and ``horizon[*,7]...`` in every July. A ``*`` in the variable's own index
 (``flow_vol_phase[*,Liq]``) is the variable's business, not a scope's.
 
 Nothing here imports a model library; these functions only compare paths.
-(Moved from flex-orchestrator, unchanged; PLAN.md D22.)
+(Moved from flex-orchestrator, unchanged.)
 """
 
 from __future__ import annotations

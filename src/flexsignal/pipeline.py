@@ -211,7 +211,9 @@ def step_record(
     Returns:
         A JSON-able dict with the step's index, kind and name, the spec hash,
         row counts, streams added and removed, and (when the time index is
-        unchanged) how many samples changed per stream.
+        unchanged) how many samples changed per stream. A registered method's
+        record also names the function behind it (``function``: module,
+        function, package and version).
     """
     record: dict[str, Any] = {
         "index": index,
@@ -223,6 +225,10 @@ def step_record(
         "streams_added": [c for c in after.columns if c not in before],
         "streams_removed": [c for c in before.columns if c not in after],
     }
+    method = getattr(type(step), "registered", None)
+    source = getattr(method, "source", None)
+    if source:
+        record["function"] = dict(source)
     if before.index.equals(after.index):
         bv, av, bf, af = before.values, after.values, before.flags, after.flags
         changed = {}
@@ -478,7 +484,7 @@ class FittedPipeline:
             ``{"format", "format_version", "flexsignal_version", "spec",
             "spec_hash", "state": {"steps": [...]}, "fit_report", "blobs"}``.
             Everything except ``blobs`` is JSON-able. ``blobs`` maps a name to
-            bytes, for steps whose state can't be JSON (none in M1).
+            bytes, for steps whose state can't be JSON (none yet).
         """
         return {
             "format": PAYLOAD_FORMAT,
@@ -574,8 +580,20 @@ class FittedPipeline:
         return root
 
     @classmethod
-    def load(cls, directory: str | Path) -> FittedPipeline:
-        """Load a pipeline saved with :meth:`save`."""
+    def load(
+        cls, directory: str | Path, *, plugins: Sequence[str] = ()
+    ) -> FittedPipeline:
+        """Load a pipeline saved with :meth:`save`.
+
+        Args:
+            directory: Where it was saved.
+            plugins: Modules to import first, so the methods they register (and
+                the saved pipeline uses) are available (see
+                :func:`flexsignal.load_plugins`).
+        """
+        from flexsignal.steps.registered import load_plugins
+
+        load_plugins(*([plugins] if isinstance(plugins, str) else plugins))
         root = Path(directory)
         manifest_path = root / "fitted" / "manifest.json"
         if not manifest_path.exists():

@@ -1,6 +1,6 @@
 """Correction steps: fix a stream's systematic error using a trusted reference.
 
-``calibrate`` is PLAN.md's A/B/C/D case. Stream A always reports, but with an
+``calibrate`` solves the A/B/C/D case. Stream A always reports, but with an
 error that varies. Stream B measures the same quantity accurately, but only some
 of the time, and only while some condition holds. ``calibrate`` learns the
 mapping from A to B on the rows where B can be trusted, then applies it to A

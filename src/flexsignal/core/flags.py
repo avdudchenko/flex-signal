@@ -70,7 +70,10 @@ FLAG_DESCRIPTIONS: dict[Flag, tuple[str, str]] = {
         "A gap was filled by a model.",
         "kalman, regression, knn, iterative",
     ),
-    Flag.FORECAST: ("The value is a forecast, not a measurement.", "forecast (M4)"),
+    Flag.FORECAST: (
+        "The value is a forecast, not a measurement.",
+        "persistence, seasonal_naive, structural, regression (forecast steps)",
+    ),
     Flag.DERIVED: ("The stream was computed from other streams.", "combine"),
     Flag.RESAMPLED: (
         "The value was aggregated or moved onto a new time grid.",

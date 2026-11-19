@@ -34,7 +34,8 @@ A few notes:
 - `knn` and `iterative` learn from the data they fill, every time they run. They are convenient but not fitted
   models: their fill for a row can change when other rows change.
 
-Deep-learning imputers (SAITS, BRITS and others, through PyPOTS) arrive in M5.
+Deep-learning imputers (SAITS, BRITS and others, through PyPOTS) are in the `[pypots]` extra:
+`fs.impute.PypotsImpute`, which can also be a tier.
 
 ## Tiers
 
