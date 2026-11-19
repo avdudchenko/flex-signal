@@ -18,6 +18,7 @@ built-in keys, in :mod:`flexsignal.backends.builtin`.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -175,7 +176,19 @@ def fit_linear(
             intercept, coef = float(model.intercept_), np.ravel(model.coef_)
         else:
             design = np.column_stack([np.ones(len(y)), X])
-            fitted = cls(y, design, **params).fit()
+            # statsmodels only warns about arguments it doesn't know, and then
+            # ignores them: a misspelled one is refused here instead.
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                model = cls(y, design, **params)
+            unknown = [
+                str(w.message) for w in caught if "unknown kwargs" in str(w.message)
+            ]
+            if unknown:
+                raise TypeError("; ".join(unknown))
+            for w in caught:  # pass any other warnings on as they were
+                warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+            fitted = model.fit()
             intercept, coef = float(fitted.params[0]), np.asarray(fitted.params[1:])
     except TypeError as exc:
         raise SignalConfigError(

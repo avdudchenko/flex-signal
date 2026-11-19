@@ -87,7 +87,12 @@ def test_from_frame_names_a_missing_time_column():
 @pytest.mark.unit
 def test_from_frame_parses_a_text_index():
     text = _df().set_axis(
-        ["2025-01-01 00:00", "2025-01-01 00:15", "2025-01-01 00:30", "2025-01-01 00:45"],
+        [
+            "2025-01-01 00:00",
+            "2025-01-01 00:15",
+            "2025-01-01 00:30",
+            "2025-01-01 00:45",
+        ],
         axis=0,
     )
     sf = fs.SignalFrame.from_frame(text, timezone="UTC")
@@ -149,3 +154,13 @@ def test_to_pandas_with_and_without_flags():
     flat = sf.to_pandas(include_flags=True)
     assert list(flat.columns) == ["a", "b", f"a{FLAGS_SUFFIX}", f"b{FLAGS_SUFFIX}"]
     assert flat[f"a{FLAGS_SUFFIX}"].tolist() == [0, int(Flag.MISSING), 0, 0]
+
+
+@pytest.mark.unit
+def test_an_index_of_plain_text_gets_flex_signals_error_not_a_pandas_warning():
+    import pandas as pd
+
+    import flexsignal as fs
+
+    with pytest.raises(fs.SignalDataError, match="could not be parsed as timestamps"):
+        fs.SignalFrame.from_frame(pd.DataFrame({"flow": [1.0, 2.0]}, index=["a", "b"]))

@@ -132,3 +132,14 @@ def test_fit_curve_that_does_not_converge_is_a_data_error():
     with pytest.raises(SignalDataError, match="didn't converge") as exc:
         fit_curve("a * exp(b * A)", df, y, {"a": 1.0, "b": 1.0}, {"maxfev": 2})
     assert "maxfev" in exc.value.message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["statsmodels:OLS", "statsmodels:RLM"])
+def test_statsmodels_refuses_an_unknown_param_instead_of_ignoring_it(key):
+    X = np.arange(20.0)[:, None]
+    y = 2.0 * X[:, 0] + 1.0
+    with pytest.raises(SignalConfigError, match="bogus") as err:
+        fit_linear(key, X, y, {"bogus": 1})
+    assert err.value.field == "params"
+    assert fit_linear(key, X, y, {"missing": "drop"})["coef"] == pytest.approx([2.0])
