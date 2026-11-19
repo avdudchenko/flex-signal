@@ -146,11 +146,11 @@ def test_option_descriptions_come_from_the_docstring():
 @pytest.mark.parametrize(
     ("kind", "option", "value"),
     [
-        ("PypotsImpute", "model", "XGBoost"),
+        ("PypotsImpute", "model", "pypots.imputation:SAITS"),
         ("PypotsImpute", "epochs", "many"),
         ("PypotsImpute", "features", "pressure"),
         ("PypotsImpute", "params", [1, 2]),
-        ("PypotsForecast", "model", "SegRNN"),
+        ("PypotsForecast", "model", "os.system"),
         ("PypotsForecast", "samples", 1.5),
     ],
 )

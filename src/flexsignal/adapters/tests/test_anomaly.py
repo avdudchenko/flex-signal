@@ -117,10 +117,10 @@ def test_methods_and_backend_keys_are_registered(anomaly):
 @pytest.mark.parametrize(
     "step, field",
     [
-        ({"kind": "PyodDetector", "model": "Bogus"}, "model"),
+        ({"kind": "PyodDetector", "model": "pyod.models.knn:KNN"}, "model"),
         ({"kind": "PyodDetector", "contamination": "lots"}, "contamination"),
         ({"kind": "PyodDetector", "features": ["value", "nope"]}, "features.1"),
-        ({"kind": "RupturesChangepoint", "algorithm": "Dynp"}, "algorithm"),
+        ({"kind": "RupturesChangepoint", "algorithm": "../Pelt"}, "algorithm"),
         ({"kind": "RupturesChangepoint", "cost": "rbf"}, "cost"),
         ({"kind": "RupturesChangepoint", "min_size": "two"}, "min_size"),
         ({"kind": "StumpyDiscord", "k": "high"}, "k"),

@@ -75,7 +75,7 @@ def test_registered_with_documented_options():
 @pytest.mark.parametrize(
     ("option", "value"),
     [
-        ("model", "TFT"),
+        ("model", "neuralforecast.models.TFT"),
         ("max_steps", "lots"),
         ("loss", "huber"),
         ("scaler", "log"),

@@ -88,7 +88,7 @@ def test_python_and_json_agree_save_and_repeat(tmp_path):
 @pytest.mark.parametrize(
     "option, value",
     [
-        ("model", "AutoARIMA"),
+        ("model", "sktime.forecasting.arima:AutoARIMA"),
         ("model", "sktime.forecasting.arima:ARIMA"),
         ("params", "sp=24"),
         ("season", 24),

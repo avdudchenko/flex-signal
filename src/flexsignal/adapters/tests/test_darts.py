@@ -95,7 +95,7 @@ def test_python_and_json_agree_save_and_repeat(tmp_path):
 @pytest.mark.parametrize(
     "option, value",
     [
-        ("model", "Prophet"),
+        ("model", "darts.models.Prophet"),
         ("model", "darts.models:TFTModel"),
         ("num_samples", "many"),
         ("params", [1, 2]),
