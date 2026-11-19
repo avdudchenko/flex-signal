@@ -133,9 +133,10 @@ def _chronos(model: str, revision: str) -> Any:
 def _run_chronos(
     history: pd.DataFrame, future: pd.DataFrame, model: str, revision: str, steps: int
 ) -> dict[str, np.ndarray]:
+    # Load first: a missing chronos or torch raises the error naming the extra.
+    pipeline = _chronos(model, revision)
     import torch
 
-    pipeline = _chronos(model, revision)
     seed_torch(0)
     target = history.iloc[:, 0].to_numpy(dtype="float64")
     inputs: dict[str, Any] = {"target": target}
