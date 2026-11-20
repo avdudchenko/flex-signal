@@ -11,7 +11,6 @@ when used, so optional libraries cost nothing until a step needs them.
 
 from flexsignal.backends import models
 from flexsignal.backends.registry import (
-    BACKEND_ENTRY_POINT_GROUP,
     BackendInfo,
     get_backend,
     register_backend,
@@ -19,7 +18,6 @@ from flexsignal.backends.registry import (
 )
 
 __all__ = [
-    "BACKEND_ENTRY_POINT_GROUP",
     "BackendInfo",
     "get_backend",
     "models",

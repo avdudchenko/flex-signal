@@ -18,7 +18,7 @@ or ``IMPUTED_MODEL`` (a model).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any, Literal
 
 import numpy as np
@@ -32,7 +32,7 @@ from flexsignal.backends.models import (
     is_linear_model,
     predict_linear,
 )
-from flexsignal.core.exceptions import SignalConfigError, SignalDataError
+from flexsignal.core.exceptions import SignalDataError
 from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
 from flexsignal.core.registry import find_step, get_step_class, register_step
@@ -47,19 +47,22 @@ from flexsignal.steps._base import (
     check_streams,
     fourier_terms,
     gaps_to_fill,
+    one_is_a_list,
+    registered_lookup,
     regular_step,
     seconds,
+    structural_args,
+    whole_steps,
 )
 
 __all__ = [
     "KNN",
-    "FourierTerm",
+    "CycleTerm",
     "ImputeTier",
     "Interpolate",
     "Iterative",
     "Kalman",
     "Regression",
-    "SeasonalTerm",
     "Tiered",
 ]
 
@@ -186,13 +189,27 @@ class Interpolate(_GapImputer):
 # -- kalman -------------------------------------------------------------------------
 
 
-class SeasonalTerm(StrictModel):
-    """A repeating cycle, described by a few sine and cosine waves."""
+class CycleTerm(StrictModel):
+    """A repeating cycle, such as a day or a week, as a few sine and cosine waves.
+
+    Used by ``kalman`` and ``structural`` (``seasonal``) and by both
+    ``regression`` steps (``fourier``).
+    """
 
     period: Duration = Field(description="Length of one cycle, e.g. 1D or 7D.")
-    harmonics: int = Field(
-        2, ge=1, le=20, description="How many sine/cosine pairs describe its shape."
+    harmonics: int | None = Field(
+        None,
+        ge=1,
+        le=20,
+        description=(
+            "How many sine/cosine pairs describe its shape. Default: 2 for kalman "
+            "and structural, 3 for regression."
+        ),
     )
+
+    def pairs(self, default: int) -> int:
+        """Return ``harmonics``, or the using step's ``default`` when it is unset."""
+        return self.harmonics if self.harmonics is not None else default
 
 
 @register_step
@@ -216,21 +233,13 @@ class Kalman(_GapImputer):
     level: Literal["local_level", "local_linear_trend"] = Field(
         "local_level", description="How the underlying level moves."
     )
-    seasonal: tuple[SeasonalTerm, ...] = Field(
+    seasonal: tuple[CycleTerm, ...] = Field(
         (), description="Repeating cycles, e.g. [{period: 1D, harmonics: 2}]."
     )
 
     def _model(self, series: np.ndarray, step: pd.Timedelta):
         cls = get_backend("statsmodels:UnobservedComponents")
-        freq_seasonal = [
-            {
-                "period": to_timedelta(term.period) / step,
-                "harmonics": term.harmonics,
-            }
-            for term in self.seasonal
-        ]
-        level = {"local_level": "llevel", "local_linear_trend": "lltrend"}[self.level]
-        return cls(series, level=level, freq_seasonal=freq_seasonal or None)
+        return cls(series, **structural_args(self.level, self.seasonal, step))
 
     def fit(self, sf: SignalFrame) -> dict[str, Any]:
         """Estimate each stream's model variances on the training data."""
@@ -271,15 +280,6 @@ class Kalman(_GapImputer):
 # -- regression ---------------------------------------------------------------------
 
 
-class FourierTerm(StrictModel):
-    """A daily, weekly or other cycle, as sine and cosine inputs to a model."""
-
-    period: Duration = Field(description="Length of one cycle, e.g. 1D or 7D.")
-    harmonics: int = Field(
-        3, ge=1, le=20, description="How many sine/cosine pairs to use."
-    )
-
-
 @register_step
 class Regression(_GapImputer):
     """Fill gaps from a linear model of other streams and of time of day or week.
@@ -305,7 +305,7 @@ class Regression(_GapImputer):
             "regular index."
         ),
     )
-    fourier: tuple[FourierTerm, ...] = Field(
+    fourier: tuple[CycleTerm, ...] = Field(
         (), description="Cycles to model, e.g. [{period: 1D, harmonics: 3}]."
     )
     model: str = Field(
@@ -323,10 +323,7 @@ class Regression(_GapImputer):
             raise ValueError(f"regression needs a linear model, not {value!r}")
         return value
 
-    @field_validator("features", "lags", mode="before")
-    @classmethod
-    def _one_is_a_list(cls, value: Any) -> Any:
-        return (value,) if isinstance(value, str) else value
+    _one_is_a_list = field_validator("features", "lags", mode="before")(one_is_a_list)
 
     @model_validator(mode="after")
     def _has_inputs(self) -> Regression:
@@ -349,15 +346,12 @@ class Regression(_GapImputer):
         if self.lags:
             step = regular_step(sf.index, kind="regression with lags")
             for lag in self.lags:
-                periods, remainder = divmod(to_timedelta(lag).value, step.value)
-                if remainder:
-                    raise SignalConfigError(
-                        f"lag {lag} is not a whole number of the data's {step} steps.",
-                        field="lags",
-                    )
+                periods = whole_steps(
+                    to_timedelta(lag), step, what=f"lag {lag}", field="lags"
+                )
                 for f in self.features:
-                    columns.append(values[f].shift(int(periods)).to_numpy())
-        terms = [(to_timedelta(t.period), t.harmonics) for t in self.fourier]
+                    columns.append(values[f].shift(periods).to_numpy())
+        terms = [(to_timedelta(t.period), t.pairs(3)) for t in self.fourier]
         cycles = fourier_terms(sf.index, terms)
         parts = [np.column_stack(columns)] if columns else []
         return np.column_stack([*parts, cycles]) if parts else cycles
@@ -399,10 +393,7 @@ class _MatrixImputer(_GapImputer):
         ),
     )
 
-    @field_validator("features", mode="before")
-    @classmethod
-    def _one_feature_is_a_list(cls, value: Any) -> Any:
-        return (value,) if isinstance(value, str) else value
+    _one_feature_is_a_list = field_validator("features", mode="before")(one_is_a_list)
 
     def _impute(self, block: np.ndarray) -> np.ndarray:
         raise NotImplementedError
@@ -411,11 +402,13 @@ class _MatrixImputer(_GapImputer):
         """Fill gaps (see the class docstring)."""
         targets = self._targets(sf)
         check_streams(sf, self.features, field="features")
+        if not any(w.any() for w in targets.values()):
+            return sf
         columns = list(dict.fromkeys([*self.streams, *self.features]))
         block = sf.values[columns].to_numpy(dtype="float64")
         keep = ~np.isnan(block).all(axis=0)
-        if not any(w.any() for w in targets.values()):
-            return sf
+        if not keep.any():
+            return sf  # every stream is empty: nothing to learn from
         scaled, mean, std = _standardize(block[:, keep])
         result = np.full(block.shape, np.nan)
         result[:, keep] = self._impute(scaled) * std + mean
@@ -586,18 +579,4 @@ class Tiered(StreamStep):
         return sf.evolve(values=values, flags=flags)
 
 
-def tier_methods() -> Sequence[str]:
-    """Return the methods a tier may use."""
-    return _TIER_METHODS
-
-
-def __getattr__(name: str) -> type:
-    """Return the registered imputer called ``name`` (a registered method)."""
-    if name.startswith("_"):
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from flexsignal.steps.registered import registered_class
-
-    cls = registered_class("imputer", name)
-    if cls is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return cls
+__getattr__ = registered_lookup(__name__, "imputer")

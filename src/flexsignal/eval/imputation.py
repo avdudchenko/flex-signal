@@ -21,22 +21,15 @@ import pandas as pd
 from flexsignal.core.exceptions import SignalConfigError, SignalDataError
 from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
+from flexsignal.eval.scores import metrics
 from flexsignal.pipeline import Pipeline
 from flexsignal.spec import StepSpec, to_timedelta
+from flexsignal.steps._base import regular_step
 
 __all__ = ["benchmark_imputers", "hide_values", "summarize"]
 
 Imputer = StepSpec | Sequence[StepSpec]
 """An imputer to benchmark: one step, or several run in order."""
-
-
-def _step(index: pd.DatetimeIndex) -> pd.Timedelta:
-    diffs = np.unique(np.diff(index.asi8))
-    if len(index) < 2 or len(diffs) != 1:
-        raise SignalDataError(
-            "the benchmark needs a regular time index; run align or resample first."
-        )
-    return pd.Timedelta(int(diffs[0]), unit="ns")
 
 
 def hide_values(
@@ -58,6 +51,8 @@ def hide_values(
         count: How many gaps to make in each stream.
         pattern: ``block``: each gap is one run of hidden samples. ``random``:
             the same number of samples, hidden one at a time at random places.
+            No two of them are next to each other, so each is a one-sample gap
+            between two valid samples.
         seed: Seed for where the gaps go.
 
     Returns:
@@ -65,15 +60,23 @@ def hide_values(
         ``MISSING``), and a boolean frame that is True where a value was hidden.
 
     Raises:
+        SignalConfigError: If ``gap`` isn't a whole number of steps (at least
+            two), or ``count`` is less than 1.
         SignalDataError: If there isn't room for ``count`` gaps of this length.
     """
-    step = _step(sf.index)
+    step = regular_step(sf.index, kind="hide_values")
     periods, remainder = divmod(to_timedelta(gap).value, step.value)
     if remainder or periods < 2:
         raise SignalConfigError(
             f"gap {gap} must be a whole number of the data's {step} steps, and at "
             "least two of them.",
             field="gap",
+        )
+    if count < 1:
+        raise SignalConfigError(
+            f"count is {count}, but it must be at least 1: it is how many gaps to "
+            "make in each stream.",
+            field="count",
         )
     length = int(periods) - 1
     rng = np.random.default_rng(seed)
@@ -104,12 +107,21 @@ def hide_values(
             interior = np.flatnonzero(valid[1:-1]) + 1
             neighbours = valid[interior - 1] & valid[interior + 1]
             candidates = interior[neighbours]
-            if len(candidates) < count * length:
+            rng.shuffle(candidates)
+            # Each hidden sample keeps both neighbours valid, so no two picks
+            # touch and every gap is a single sample.
+            taken = np.zeros(len(valid), dtype=bool)
+            for pick in candidates:
+                if not taken[pick]:
+                    taken[pick - 1 : pick + 2] = True
+                    positions.append(pick)
+                    if len(positions) == count * length:
+                        break
+            if len(positions) < count * length:
                 raise SignalDataError(
-                    f"{col!r} has only {len(candidates)} values with valid neighbours "
-                    f"to hide; asked for {count * length}."
+                    f"room for only {len(positions)} of {count * length} separate "
+                    f"single-sample gaps in {col!r}; ask for fewer or shorter gaps."
                 )
-            positions = list(rng.choice(candidates, count * length, replace=False))
         mask = np.zeros(len(valid), dtype=bool)
         mask[positions] = True
         hidden[col] = mask
@@ -180,6 +192,7 @@ def benchmark_imputers(
                     guess = filled[col].to_numpy()[where]
                     got = ~np.isnan(guess)
                     error = guess[got] - truth[got]
+                    scores = metrics(pd.Series(truth), pd.Series(guess))
                     rows.append(
                         {
                             "imputer": name,
@@ -189,14 +202,8 @@ def benchmark_imputers(
                             "hidden": int(where.sum()),
                             "filled": int(got.sum()),
                             "coverage": float(got.mean()) if len(got) else np.nan,
-                            "rmse": (
-                                float(np.sqrt(np.mean(error**2)))
-                                if len(error)
-                                else np.nan
-                            ),
-                            "mae": (
-                                float(np.mean(np.abs(error))) if len(error) else np.nan
-                            ),
+                            "rmse": scores["rmse"],
+                            "mae": scores["mae"],
                             "bias": float(np.mean(error)) if len(error) else np.nan,
                         }
                     )

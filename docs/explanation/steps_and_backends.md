@@ -33,11 +33,10 @@ the first time it's used, so an optional library costs nothing until a step need
 missing, the error names the extra that installs it, for example
 `` pip install flex-signal[pypots] ``.
 
-In Python, `get_backend` also accepts any `"package.module:attribute"` string, which is how your own code plugs
-in. Spec fields don't: a step's `model` must be one of the keys it lists, because loading a spec must never import
-code. You can register keys of your own with {func}`~flexsignal.backends.register_backend`, or through the
-`flexsignal.backends` entry-point group, and use them from [your own steps](#adding-your-own-step) with
-`get_backend`. The built-in steps don't accept arbitrary keys: `calibrate` and `regression` take the models they
+`get_backend` resolves registered keys only, never an arbitrary `"package.module:attribute"` string, and a
+step's `model` must be one of the keys it lists, because loading a spec must never import code. You can register
+keys of your own with {func}`~flexsignal.backends.register_backend` from your code, and use them from
+[your own steps](#adding-your-own-step) with `get_backend`. The built-in steps don't accept arbitrary keys: `calibrate` and `regression` take the models they
 list or a model registered with {func}`~flexsignal.register_model`, and `interpolate` only its fixed methods. The
 simpler route to a method of your own is to register a plain function as a cleaner, imputer, forecaster or model,
 and use it by name from Python or a JSON spec ([Your own methods](extending.md)). Only registered methods can run,

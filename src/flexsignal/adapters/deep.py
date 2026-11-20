@@ -22,12 +22,15 @@ import numpy as np
 import pandas as pd
 
 from flexsignal.adapters._common import (
+    Forecast,
     ModelName,
+    build_model,
     model_class,
     model_option,
+    quantile_key,
     regular_step,
     require,
-    seed_torch,
+    seeded,
     steps_in,
 )
 from flexsignal.backends import register_backend
@@ -122,26 +125,8 @@ def _quiet() -> Iterator[None]:
 
 
 def _check_params(cls: type, params: dict[str, Any], exog: list[str]) -> dict:
-    if not isinstance(params, dict):
-        raise SignalConfigError(
-            f"{METHOD}: params must be a dict of extra {cls.__name__} arguments.",
-            field="params",
-        )
-    accepted = set(inspect.signature(cls.__init__).parameters) - {"self", "kwargs"}
-    for key, value in params.items():
-        if key in _OWNED:
-            raise SignalConfigError(
-                f"{METHOD}: params can't set {key!r}; flex-signal sets it (use the "
-                "step's own options: horizon, input_size, max_steps, seed, loss, "
-                "scaler, exog).",
-                field=f"params.{key}",
-            )
-        if key not in accepted:
-            raise SignalConfigError(
-                f"{METHOD}: {cls.__name__} has no argument {key!r}. It accepts: "
-                f"{', '.join(sorted(accepted - _OWNED))}.",
-                field=f"params.{key}",
-            )
+    """Check what build_model doesn't: JSON values, and a model that takes exog."""
+    for key, value in params.items() if isinstance(params, dict) else ():
         try:
             json.dumps(value)
         except (TypeError, ValueError):
@@ -156,7 +141,18 @@ def _check_params(cls: type, params: dict[str, Any], exog: list[str]) -> dict:
             f"model that can: {', '.join(with_exog)}.",
             field="model",
         )
-    return dict(params)
+    return params
+
+
+def _exog_values(frame: pd.DataFrame, exog: list[str], where: str) -> None:
+    """Refuse a missing exog value: neuralforecast can't train or forecast on one."""
+    for col in exog:
+        if frame[col].isna().any():
+            when = frame.index[frame[col].isna().to_numpy()][0]
+            raise SignalDataError(
+                f"{METHOD}: exog stream {col!r} has no value at {when} in the "
+                f"{where}; fill it (e.g. an impute step) before the forecast step."
+            )
 
 
 def _frames(
@@ -167,13 +163,8 @@ def _frames(
     y = history.iloc[:, 0]
     first = y.first_valid_index()
     history = history.loc[first:]
-    for col in exog:
-        if history[col].isna().any():
-            when = history.index[history[col].isna().to_numpy()][0]
-            raise SignalDataError(
-                f"{METHOD}: exog stream {col!r} has no value at {when} in the "
-                "history; fill it (e.g. an impute step) before the forecast step."
-            )
+    _exog_values(history, exog, "history")
+    _exog_values(future, exog, "forecast rows")
     ds = history.index.tz_convert("UTC").tz_localize(None)
     df = pd.DataFrame(
         {
@@ -312,31 +303,22 @@ def neuralforecast_forecast(
         "enable_progress_bar": False,
         "enable_model_summary": False,
         "enable_checkpointing": False,
-        **extra,
     }
     if exog:
         kwargs["futr_exog_list"] = exog
-    signature = inspect.signature(cls.__init__).parameters
-    if "n_series" in signature and "n_series" not in kwargs:
+    if "n_series" in inspect.signature(cls.__init__).parameters:
         kwargs["n_series"] = 1  # a multivariate model, given one stream
-    missing = [
-        name
-        for name, p in signature.items()
-        if name != "self"
-        and p.default is p.empty
-        and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
-        and name not in kwargs
-    ]
-    if missing:
-        raise SignalConfigError(
-            f"{METHOD}: neuralforecast {model} needs {missing}: give them in "
-            f"params, e.g. params={{{missing[0]!r}: ...}}. See {OPTION.catalogue}.",
-            field="params",
-            value=missing,
+    with _quiet(), seeded(seed):
+        network = build_model(
+            cls,
+            kwargs,
+            extra,
+            OPTION,
+            managed=_OWNED,
+            why_managed="flex-signal sets those itself, so use the step's own "
+            "options (horizon, input_size, max_steps, seed, loss, scaler, exog)",
+            strict=True,
         )
-    with _quiet():
-        seed_torch(seed)
-        network = cls(**kwargs)
         freq = pd.tseries.frequencies.to_offset(step).freqstr
         forecaster = nf.NeuralForecast(models=[network], freq=freq)
         forecaster.fit(df)
@@ -347,14 +329,24 @@ def neuralforecast_forecast(
         )
     columns = [c for c in out.columns if c.startswith(cls.__name__)]
     if loss != "quantile":
-        return {"mean": out[columns[0]].to_numpy("float64")}
-    result: dict[str, np.ndarray] = {}
+        return Forecast(
+            out[columns[0]].to_numpy("float64"),
+            None,
+            f"{METHOD}: loss={loss!r} trains a single forecast, not quantiles, so "
+            "it can't write quantiles; use loss='quantile' or remove quantiles.",
+        )
+    quantiles: dict[str, np.ndarray] = {}
     for col in columns:
         q = _quantile_of(col)
         if q is not None:
-            result[f"q{round(q * 100):02d}"] = out[col].to_numpy("float64")
-    result["mean"] = result["q50"]
-    return result
+            quantiles[quantile_key(q)] = out[col].to_numpy("float64")
+    trained = ", ".join(f"{q:g}" for q in QUANTILES)
+    return Forecast(
+        quantiles["q50"],
+        quantiles,
+        lambda q: f"{METHOD}: loss='quantile' trains the quantiles {trained}, not "
+        f"{q:g}; request only those in quantiles.",
+    )
 
 
 register_forecaster(METHOD, neuralforecast_forecast)

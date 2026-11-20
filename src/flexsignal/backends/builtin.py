@@ -5,9 +5,8 @@ module the first time a key is looked up, so importing ``flexsignal`` doesn't
 import scipy, scikit-learn or statsmodels; each library is imported only when a
 step uses one of its keys.
 
-To add a key from your own package, call
-:func:`~flexsignal.backends.register_backend` from a function exposed through
-the ``flexsignal.backends`` entry-point group.
+To add a key of your own, call :func:`~flexsignal.backends.register_backend`
+from your code, e.g. in the module that defines the step that uses it.
 """
 
 from __future__ import annotations

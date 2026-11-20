@@ -58,3 +58,27 @@ surrogate = regressor.to_surrogate_spec()   # for the flex-pse model
 
 `align="outer"` keeps every timestamp any input has, which leaves gaps for the rule to handle; `"inner"` (the default)
 keeps only the timestamps all of them share.
+
+## Window, names and clock
+
+Three more options shape the result for the regressor and the model it feeds:
+
+```python
+fit = handoff.fit_data(
+    clean.select(["flow"]),
+    clean.select(["pressure"]),
+    {
+        "resample": {"freq": "1h"},
+        "gaps": "drop",
+        "start": "2025-01-07",                  # keep rows from here (UTC without a zone)
+        "end": "2025-01-09",                    # ... up to, not including, here
+        "rename": {"flow": "flow_in", "pressure": "pressure_out"},  # the model's names
+        "timezone": "America/Los_Angeles",      # naive wall-clock times, as the model runs
+    },
+)
+assert list(fit.X.columns) == ["flow_in"] and fit.X.index.tz is None
+```
+
+`timezone` matters for time-series surrogates such as flex-pse's ARIMA, whose fitted history is dated by the index:
+it must be on the same naive clock as the model's time steps, as `to_grid` gives them with
+`GridOptions(timezone=...)`.

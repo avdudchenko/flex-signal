@@ -169,3 +169,17 @@ def test_every_included_method_is_in_the_methods_page(monkeypatch):
     models = flexsignaldoc.collect_model_rows()
     assert len(models) == len(MODEL_OPTIONS) > 0
     assert all("https://" in row[3] for row in models)
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not TUTORIALS, reason="tutorials not present")
+def test_prerendered_tutorials_have_their_page():
+    # docs.yml uses docs/tutorials/prerendered/<name>.html for a tutorial marked
+    # "# docs-page: prerendered" when the docs job can't install what it needs.
+    for tutorial in TUTORIALS:
+        if "# docs-page: prerendered" in tutorial.read_text(encoding="utf-8"):
+            page = REPO / "docs" / "tutorials" / "prerendered" / f"{tutorial.stem}.html"
+            assert page.is_file(), (
+                f"{tutorial.name} is marked prerendered but {page} is missing; "
+                f"render it with `marimo export html {tutorial} -o {page}`."
+            )

@@ -12,7 +12,7 @@ on:
     - cron: "0 6 * * 1"  # Mondays: integration against flex-pse main
 
 env:
-  # The latest flex-pse release (PLAN.md D3). flex-pse isn't on PyPI, so it is
+  # The latest flex-pse release. flex-pse isn't on PyPI, so it is
   # pinned by git tag here and in environment.yml; bump both together.
   FLEXPSE_REF: "0.3.1"
 
@@ -87,7 +87,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
       # The tutorials extra lets the integration tier run every marimo tutorial
-      # as a script (PLAN.md D12); flex-pse, with HiGHS, runs the hand-off tests.
+      # as a script; flex-pse, with HiGHS, runs the hand-off tests.
       - run: uv pip install --system -e ".[dev,tutorials]"
       - run: uv pip install --system "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@${FLEXPSE_REF}"
       # pytest exits 5 if no tests are collected; that is treated as success so
@@ -112,7 +112,7 @@ jobs:
           python-version: "3.13"
       - uses: astral-sh/setup-uv@v6
       - run: uv pip install --system -e ".[dev,tutorials]"
-      # flex-pse main, to catch breakage before the next release (PLAN.md D3).
+      # flex-pse main, to catch breakage before the next release.
       - run: uv pip install --system "flex-pse[parameterize,solvers] @ git+https://github.com/flex-pse/flex-pse.git@main"
       - run: pytest -m integration
 

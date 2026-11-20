@@ -357,7 +357,7 @@
     },
     "Combine": {
       "additionalProperties": false,
-      "description": "Build a new stream from several, e.g. two redundant meters.\n\nThe result is flagged ``DERIVED``. For ``coalesce``, each sample takes the\nfirst stream (in order) that has a value, along with that stream's flags. For\nthe other methods, the result's flags are the OR of every input's flags.",
+      "description": "Build a new stream from several, e.g. two redundant meters.\n\nThe result is flagged ``DERIVED``. For ``coalesce``, each sample takes the\nfirst stream (in order) that has a value, along with that stream's flags. For\nthe other methods, the result's flags are the OR of every input's flags,\nwithout ``MISSING`` where the result has a value.\n\n``sum`` is missing wherever any input is missing, since a total with a term\nleft out is too low. ``missing_as_zero=True`` counts a missing input as 0\ninstead; a time where every input is missing stays missing. ``mean``, ``min``\nand ``max`` use whichever inputs have a value, as for redundant meters.",
       "properties": {
         "how": {
           "default": "coalesce",
@@ -377,6 +377,12 @@
           "default": "combine",
           "title": "Kind",
           "type": "string"
+        },
+        "missing_as_zero": {
+          "default": false,
+          "description": "For how='sum' only: count a missing input as 0 instead of making the sum missing.",
+          "title": "Missing As Zero",
+          "type": "boolean"
         },
         "name": {
           "anyOf": [
@@ -552,6 +558,37 @@
         "path"
       ],
       "title": "CsvOutput",
+      "type": "object"
+    },
+    "CycleTerm": {
+      "additionalProperties": false,
+      "description": "A repeating cycle, such as a day or a week, as a few sine and cosine waves.\n\nUsed by ``kalman`` and ``structural`` (``seasonal``) and by both\n``regression`` steps (``fourier``).",
+      "properties": {
+        "harmonics": {
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many sine/cosine pairs describe its shape. Default: 2 for kalman and structural, 3 for regression.",
+          "title": "Harmonics"
+        },
+        "period": {
+          "description": "Length of one cycle, e.g. 1D or 7D.",
+          "title": "Period",
+          "type": "string"
+        }
+      },
+      "required": [
+        "period"
+      ],
+      "title": "CycleTerm",
       "type": "object"
     },
     "DartsForecast": {
@@ -761,7 +798,8 @@
             "OUT_OF_RANGE",
             "RATE_OF_CHANGE",
             "OUTLIER",
-            "STUCK"
+            "STUCK",
+            "EXCLUDED"
           ],
           "title": "Flag",
           "type": "string"
@@ -897,30 +935,6 @@
         "method"
       ],
       "title": "Filter",
-      "type": "object"
-    },
-    "FourierTerm": {
-      "additionalProperties": false,
-      "description": "A daily, weekly or other cycle, as sine and cosine inputs to a model.",
-      "properties": {
-        "harmonics": {
-          "default": 3,
-          "description": "How many sine/cosine pairs to use.",
-          "maximum": 20,
-          "minimum": 1,
-          "title": "Harmonics",
-          "type": "integer"
-        },
-        "period": {
-          "description": "Length of one cycle, e.g. 1D or 7D.",
-          "title": "Period",
-          "type": "string"
-        }
-      },
-      "required": [
-        "period"
-      ],
-      "title": "FourierTerm",
       "type": "object"
     },
     "FrameInput": {
@@ -1314,7 +1328,7 @@
           "default": [],
           "description": "Repeating cycles, e.g. [{period: 1D, harmonics: 2}].",
           "items": {
-            "$ref": "#/$defs/SeasonalTerm"
+            "$ref": "#/$defs/CycleTerm"
           },
           "title": "Seasonal",
           "type": "array"
@@ -2149,7 +2163,7 @@
     },
     "RateOfChange": {
       "additionalProperties": false,
-      "description": "Reject values that change faster than the process physically can.\n\nEach value is compared with the last *accepted* value. If\n``|change| / elapsed time`` exceeds ``max_rate`` per ``per``, the value is\nflagged ``RATE_OF_CHANGE``. A spike is caught without flagging the point\nafter it, because that point is compared with the last good value before the\nspike. A genuine step change is accepted once enough time has passed for the\nallowed rate to cover it.",
+      "description": "Reject values that change faster than the process physically can.\n\nEach value is compared with the last *accepted* value. If\n``|change| / elapsed time`` exceeds ``max_rate`` per ``per``, the value is\nflagged ``RATE_OF_CHANGE``. A spike is caught without flagging the point\nafter it, because that point is compared with the last good value before the\nspike. A genuine step change is accepted once enough time has passed for the\nallowed rate to cover it.\n\nWith ``reset_after``, a run of that many rejected values in a row that agree\nwith each other (each within ``max_rate`` of the one before) is taken as a new\nlevel rather than a spike: the run is kept and becomes the reference. If the\nold reference was the stream's first value, nothing was accepted after it,\nso it was the outlier and is flagged instead.",
       "properties": {
         "kind": {
           "const": "rate_of_change",
@@ -2181,6 +2195,20 @@
           "description": "Time unit of max_rate, e.g. 1h or 1min.",
           "title": "Per",
           "type": "string"
+        },
+        "reset_after": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "After this many rejected values in a row that agree with each other, accept them as a new level. Default: never.",
+          "title": "Reset After"
         },
         "streams": {
           "description": "The streams this step acts on.",
@@ -2419,6 +2447,64 @@
       "title": "RupturesChangepoint",
       "type": "object"
     },
+    "Scale": {
+      "additionalProperties": false,
+      "description": "Multiply streams by a constant and give them new units.\n\nFor a change that isn't a unit conversion, which :class:`ConvertUnits`\ncan't do: through a density (kg/h of sludge to m^3/h, ``factor=0.001`` at\n1000 kg/m^3), a heating value, or a meter's known scale factor. The flags\nare unchanged.",
+      "properties": {
+        "factor": {
+          "description": "What every value is multiplied by.",
+          "title": "Factor",
+          "type": "number"
+        },
+        "kind": {
+          "const": "scale",
+          "default": "scale",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional label for this step, shown in provenance and reports. Must be unique within a spec.",
+          "title": "Name"
+        },
+        "streams": {
+          "description": "The streams this step acts on.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Streams",
+          "type": "array"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The streams' units afterwards, e.g. m^3/hr; null if unitless.",
+          "title": "Units"
+        }
+      },
+      "required": [
+        "streams",
+        "factor",
+        "units"
+      ],
+      "title": "Scale",
+      "type": "object"
+    },
     "SeasonalNaive": {
       "additionalProperties": false,
       "description": "Repeat the last season: each forecast value is the value one season earlier.\n\nWith ``season=\"1D\"``, the forecast for 14:00 tomorrow is the value at 14:00\ntoday, or the latest day before that with a value. A baseline that a\nforecaster has to beat. Its intervals widen with the square root of the\nnumber of seasons reached back, from the spread of the training data's\nseason-to-season changes.",
@@ -2499,30 +2585,6 @@
         "horizon"
       ],
       "title": "SeasonalNaive",
-      "type": "object"
-    },
-    "SeasonalTerm": {
-      "additionalProperties": false,
-      "description": "A repeating cycle, described by a few sine and cosine waves.",
-      "properties": {
-        "harmonics": {
-          "default": 2,
-          "description": "How many sine/cosine pairs describe its shape.",
-          "maximum": 20,
-          "minimum": 1,
-          "title": "Harmonics",
-          "type": "integer"
-        },
-        "period": {
-          "description": "Length of one cycle, e.g. 1D or 7D.",
-          "title": "Period",
-          "type": "string"
-        }
-      },
-      "required": [
-        "period"
-      ],
-      "title": "SeasonalTerm",
       "type": "object"
     },
     "Shift": {
@@ -2768,7 +2830,7 @@
           "default": [],
           "description": "Repeating cycles, e.g. [{period: 1D, harmonics: 2}].",
           "items": {
-            "$ref": "#/$defs/SeasonalTerm"
+            "$ref": "#/$defs/CycleTerm"
           },
           "title": "Seasonal",
           "type": "array"
@@ -3197,7 +3259,7 @@
           "default": [],
           "description": "Cycles to model, e.g. [{period: 1D, harmonics: 3}].",
           "items": {
-            "$ref": "#/$defs/FourierTerm"
+            "$ref": "#/$defs/CycleTerm"
           },
           "title": "Fourier",
           "type": "array"
@@ -3321,7 +3383,7 @@
           "default": [],
           "description": "Cycles to model, e.g. [{period: 1D, harmonics: 3}].",
           "items": {
-            "$ref": "#/$defs/FourierTerm"
+            "$ref": "#/$defs/CycleTerm"
           },
           "title": "Fourier",
           "type": "array"
@@ -3528,6 +3590,7 @@
             "regression": "#/$defs/flexsignal__steps__impute__Regression",
             "rename": "#/$defs/Rename",
             "resample": "#/$defs/Resample",
+            "scale": "#/$defs/Scale",
             "shift": "#/$defs/Shift",
             "stuck": "#/$defs/Stuck",
             "tiered": "#/$defs/Tiered",
@@ -3632,6 +3695,9 @@
           },
           {
             "$ref": "#/$defs/Resample"
+          },
+          {
+            "$ref": "#/$defs/Scale"
           },
           {
             "$ref": "#/$defs/Shift"

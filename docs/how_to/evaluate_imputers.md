@@ -51,7 +51,7 @@ Kalman smoother stays accurate.
 ## Tips
 
 - Use `repeats=3` or more for a steadier estimate; each repeat hides the gaps in new places.
-- `pattern="random"` hides single samples at random instead of runs. It mimics scattered dropouts, but it says
+- `pattern="random"` hides single samples at random, never two side by side, instead of runs. It mimics scattered dropouts, but it says
   little about outages.
 - An imputer that leaves a gap unfilled has `coverage` below 1, and its errors cover only what it filled. Compare
   methods at full coverage.

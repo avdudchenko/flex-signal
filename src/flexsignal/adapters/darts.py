@@ -15,22 +15,23 @@ is imported only when the step runs.
 from __future__ import annotations
 
 import inspect
-import re
-import warnings
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from flexsignal.adapters._common import (
+    Forecast,
     ModelName,
+    Prepared,
+    build_model,
     model_class,
     model_option,
-    regular_step,
+    quiet_pandas,
     require,
-    steps_in,
+    season_steps,
 )
 from flexsignal.backends import register_backend
 from flexsignal.core.exceptions import SignalConfigError, SignalDataError
@@ -102,167 +103,16 @@ _PROBABILISTIC = (
     'LinearRegressionModel with params {"likelihood": "quantile"}',
 )
 
-_QUANTILE_KEY = re.compile(r"q\d\d")
+_SEASONAL = (*_SEASON_ARGS, "ARIMA")
+"""The models that use ``season``."""
 
 
-# -- shared by the steps: the history as the library wants it -------------------------
-
-
-def _naive(index: pd.DatetimeIndex, step: pd.Timedelta) -> pd.DatetimeIndex:
-    """The index as naive UTC times carrying the data's frequency."""
-    if index.tz is not None:
-        index = index.tz_convert("UTC").tz_localize(None)
-    return pd.DatetimeIndex(index, freq=pd.tseries.frequencies.to_offset(step))
-
-
-class _Prepared:
-    """The target's history and the exog streams, ready for a library."""
-
-    def __init__(self, history: pd.DataFrame, future: pd.DataFrame, method: str):
-        self.stream = str(history.columns[0])
-        self.step = regular_step(history.index, method)
-        target = history.iloc[:, 0].astype("float64")
-        valid = np.flatnonzero(target.notna().to_numpy())
-        if len(valid) < 2:
-            raise SignalDataError(
-                f"{method}: {self.stream!r} has fewer than two values up to the "
-                "issue time, so there is nothing to fit on."
-            )
-        first, last = int(valid[0]), int(valid[-1])
-        y = target.iloc[first : last + 1].interpolate(method="linear")
-        self.y = pd.Series(y.to_numpy(), index=_naive(y.index, self.step))
-        """The target from its first to its last value, gaps interpolated."""
-        self.n_trail = len(target) - 1 - last
-        """Missing values at the end of the history, forecast along with the rows."""
-        self.n_ahead = self.n_trail + len(future)
-        """How many steps after the last value the forecast reaches."""
-        self.future_index = _naive(future.index, self.step)
-        self.exog = list(history.columns[1:])
-        self.covariates: pd.DataFrame | None = None
-        """The exog streams from the target's first value to the forecast's end."""
-        if self.exog:
-            both = pd.concat([history[self.exog].iloc[first:], future[self.exog]])
-            both = both.astype("float64").interpolate(limit_direction="both")
-            empty = [c for c in self.exog if both[c].isna().all()]
-            if empty:
-                raise SignalDataError(
-                    f"{method}: exog stream {empty[0]!r} has no values to use."
-                )
-            self.covariates = pd.DataFrame(
-                both.to_numpy(), index=_naive(both.index, self.step), columns=self.exog
-            )
-
-    def check_times(self, times: pd.DatetimeIndex, method: str) -> None:
-        """Check a library's forecast times are the forecast rows."""
-        got = pd.DatetimeIndex(times[-len(self.future_index) :]).as_unit("ns")
-        if len(times) != self.n_ahead or not np.array_equal(
-            got.asi8, self.future_index.as_unit("ns").asi8
-        ):
-            raise SignalDataError(  # pragma: no cover - a library bug
-                f"{method}: the library forecast times {got[0]}..{got[-1]}, not the "
-                f"forecast rows {self.future_index[0]}..{self.future_index[-1]}."
-            )
-
-
-class _Forecast(Mapping):
-    """A forecast's mean, with quantiles computed only when they are read.
-
-    flex-signal asks for ``"q10"``-style keys only when the step has
-    ``quantiles``. When the model gives no intervals, asking for ``"std"`` (the
-    last thing flex-signal tries) raises an error that says why.
-    """
-
-    def __init__(
-        self,
-        mean: np.ndarray,
-        quantile: Callable[[float], np.ndarray] | None,
-        refusal: str,
-    ):
-        self._mean = mean
-        self._quantile = quantile
-        self._refusal = refusal
-        self._cache: dict[str, np.ndarray] = {}
-
-    def __contains__(self, key: object) -> bool:
-        if key == "mean":
-            return True
-        if isinstance(key, str) and _QUANTILE_KEY.fullmatch(key):
-            return self._quantile is not None
-        if key == "std" and self._quantile is None:
-            raise SignalConfigError(self._refusal, field="quantiles")
-        return False
-
-    def __getitem__(self, key: str) -> np.ndarray:
-        if key == "mean":
-            return self._mean
-        if self._quantile is not None and _QUANTILE_KEY.fullmatch(str(key)):
-            if key not in self._cache:
-                self._cache[key] = self._quantile(int(key[1:]) / 100)
-            return self._cache[key]
-        raise KeyError(key)
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(("mean",))
-
-    def __len__(self) -> int:
-        return 1
-
-
-def _season_steps(season: str | None, step: pd.Timedelta, method: str) -> int | None:
-    """How many data steps ``season`` covers, or None without a season."""
-    if season is None:
-        return None
-    try:
-        pd.Timedelta(season)
-    except (TypeError, ValueError):
-        raise SignalConfigError(
-            f"{method}: season {season!r} isn't a duration, e.g. 1D, or null.",
-            field="season",
-        ) from None
-    return steps_in(season, step, field="season", method=method)
-
-
-@contextmanager
-def _quiet() -> Iterator[None]:
+def _quiet() -> AbstractContextManager[None]:
     """Hide darts' own deprecation warnings, which a user can't act on."""
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=pd.errors.Pandas4Warning)
-        warnings.filterwarnings(
-            "ignore", message=r".*extrapolate_trend='freq'", category=FutureWarning
-        )
-        yield
+    return quiet_pandas((r".*extrapolate_trend='freq'", FutureWarning))
 
 
 # -- the darts model --------------------------------------------------------------
-
-
-def _check_params(
-    params: Mapping[str, Any], cls: type, model: str, *, reserved: set[str]
-) -> None:
-    if not isinstance(params, Mapping):
-        raise SignalConfigError(
-            f"{NAME}: params must be a dict of {model} arguments.", field="params"
-        )
-    sig = inspect.signature(cls.__init__)
-    names = [
-        n
-        for n, p in sig.parameters.items()
-        if n != "self" and p.kind is not p.VAR_KEYWORD
-    ]
-    names += _passed_on(model)
-    for key in params:
-        if key in reserved:
-            raise SignalConfigError(
-                f"{NAME}: params {key!r} is set by flex-signal; remove it.",
-                field="params",
-            )
-        if key not in names:
-            raise SignalConfigError(
-                f"{NAME}: params {key!r} isn't an argument of darts' {model}; it takes "
-                f"{', '.join(n for n in names if n not in reserved)}.",
-                field="params",
-                value=key,
-            )
 
 
 def _passed_on(model: str) -> list[str]:
@@ -312,17 +162,19 @@ def _build(
         "darts.models.forecasting.forecasting_model", EXTRA, method=NAME
     ).ForecastingModel
     cls = model_class(models, model, OPTION, base=base)
-    _check_params(params, cls, model, reserved={"add_encoders"})
+    # A one-step season is no cycle at all (statsmodels refuses it), but it is
+    # still one lag for LinearRegressionModel.
+    cycle = season if season is not None and season > 1 else None
     kwargs: dict[str, Any] = {}
     if model in ("Theta", "FourTheta"):
         kwargs["season_mode"] = "additive"
     if model == "ARIMA":
         kwargs.update(p=1, d=0, q=0)
-        if season is not None:
-            kwargs["seasonal_order"] = (1, 1, 1, season)
-    if season is not None and model in _SEASON_ARGS:
-        kwargs[_SEASON_ARGS[model]] = season
+        if cycle is not None:
+            kwargs["seasonal_order"] = (1, 1, 1, cycle)
     if model == "LinearRegressionModel":
+        if season is not None:
+            kwargs["lags"] = season
         if has_exog:
             kwargs["lags_future_covariates"] = [0]
         if "lags" not in kwargs and "lags" not in params:
@@ -331,21 +183,23 @@ def _build(
                 "params lags.",
                 field="params",
             )
-    kwargs.update(params)
-    kwargs = _enum_params(kwargs, model)
-    for key in ("seasonal_order",):
-        if isinstance(kwargs.get(key), list):
-            kwargs[key] = tuple(kwargs[key])
+    elif cycle is not None and model in _SEASON_ARGS:
+        kwargs[_SEASON_ARGS[model]] = cycle
     if "random_state" in inspect.signature(cls.__init__).parameters:
-        kwargs.setdefault("random_state", seed)
-    try:
-        with _quiet():
-            return cls(**kwargs)
-    except (TypeError, ValueError) as exc:
-        raise SignalConfigError(
-            f"{NAME}: darts' {model} refused its arguments {kwargs}: {exc}",
-            field="params",
-        ) from None
+        kwargs["random_state"] = seed
+    params = _enum_params(dict(params), model)
+    if isinstance(params.get("seasonal_order"), list):
+        params["seasonal_order"] = tuple(params["seasonal_order"])
+    with _quiet():
+        return build_model(
+            cls,
+            _enum_params(kwargs, model),
+            params,
+            OPTION,
+            managed={"add_encoders"},
+            extra_accepted=_passed_on(model),
+            strict=True,
+        )
 
 
 def darts_forecast(
@@ -399,8 +253,8 @@ def darts_forecast(
             f"{NAME}: num_samples is between 10 and 10000, not {num_samples}.",
             field="num_samples",
         )
-    prepared = _Prepared(history, future, NAME)
-    m = _season_steps(season, prepared.step, NAME)
+    prepared = Prepared(history, future, NAME)
+    m = season_steps(season, prepared.step, NAME, used=model in _SEASONAL)
     darts = require("darts", EXTRA, method=NAME)
     estimator = _build(model, params, m, bool(prepared.exog), seed)
     if prepared.exog and not estimator.supports_future_covariates:
@@ -449,7 +303,7 @@ def darts_forecast(
         f"{NAME}: darts' {model} gives no intervals, so it can't write quantiles; "
         f"remove quantiles or use {probabilistic}."
     )
-    return _Forecast(mean, quantile, refusal)
+    return Forecast(mean, quantile, refusal)
 
 
 register_forecaster(NAME, darts_forecast)

@@ -228,27 +228,54 @@ def fit_curve(
         The fitted parameters, ``{name: value}``.
 
     Raises:
+        SignalConfigError: If ``params`` doesn't suit ``curve_fit`` (starting
+            values go in ``initial``, not ``params={"p0": ...}``), or the formula
+            gives no finite value at the starting values.
         SignalDataError: If there are too few rows, or the fit doesn't converge.
     """
     names: Sequence[str] = list(initial)
+    params = dict(params or {})
+    if "p0" in params:
+        raise SignalConfigError(
+            "don't pass p0 in params: the starting values come from initial, "
+            "one per parameter, e.g. initial={'a': 0, 'b': 1}.",
+            field="params",
+            value=params["p0"],
+        )
     if len(y) < len(names) + 1:
         raise SignalDataError(
             f"only {len(y)} rows to fit {len(names)} parameters; widen the training "
             "data or relax the fit condition."
         )
     curve_fit = get_backend(CURVE_FIT)
+    p0 = [float(initial[n]) for n in names]
 
     def model(_x: Any, *p: float) -> np.ndarray:
         return evaluate_formula(data, formula, dict(zip(names, p, strict=True)))
 
+    start = model(None, *p0)
+    if not np.all(np.isfinite(start)):
+        bad = int(np.count_nonzero(~np.isfinite(start)))
+        raise SignalConfigError(
+            f"formula {formula!r} gives NaN or infinity on {bad} of {len(start)} "
+            f"rows at the initial values {dict(zip(names, p0, strict=True))}, so "
+            "it can't be fitted. Pick initial values inside the formula's domain "
+            "(e.g. log() of a positive number).",
+            field="initial",
+        )
     try:
         popt, _ = curve_fit(
             model,
             np.zeros(len(y)),
             np.asarray(y, dtype=float),
-            p0=[float(initial[n]) for n in names],
-            **dict(params or {}),
+            p0=p0,
+            **params,
         )
+    except TypeError as exc:
+        raise SignalConfigError(
+            f"curve_fit doesn't accept params {sorted(params)}: {exc}.",
+            field="params",
+        ) from exc
     except RuntimeError as exc:
         raise SignalDataError(
             f"curve_fit didn't converge for {formula!r}: {exc}. Try better initial "

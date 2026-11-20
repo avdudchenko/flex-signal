@@ -53,8 +53,17 @@ from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
 from flexsignal.core.registry import register_step
 from flexsignal.spec.models import Duration, TimestampStr, to_timedelta, to_utc
-from flexsignal.steps._base import StreamStep, check_streams, fourier_terms
-from flexsignal.steps.impute import FourierTerm, SeasonalTerm
+from flexsignal.steps._base import (
+    StreamStep,
+    check_streams,
+    fourier_terms,
+    one_is_a_list,
+    registered_lookup,
+    regular_step,
+    structural_args,
+    whole_steps,
+)
+from flexsignal.steps.impute import CycleTerm
 
 __all__ = [
     "ForecastStep",
@@ -84,7 +93,8 @@ class _Window:
     """Where a forecast is made: the history, the forecast rows, and the inputs."""
 
     frame: SignalFrame
-    """The input, with its index extended to cover the horizon."""
+    """The input, with its index extended to cover the horizon (when forecasting;
+    a window made for ``fit`` is the input as it is)."""
     issue: pd.Timestamp
     """The issue time."""
     step: pd.Timedelta
@@ -92,7 +102,8 @@ class _Window:
     n_history: int
     """Rows at or before the issue time; the history is ``[:n_history]``."""
     future: np.ndarray
-    """Positions of the forecast rows, issue time + 1 step to + horizon."""
+    """Positions of the forecast rows, issue time + 1 step to + horizon; empty in a
+    window made for ``fit``."""
 
     def history(self, stream: str) -> np.ndarray:
         """The stream's values up to the issue time."""
@@ -108,9 +119,8 @@ class ForecastStep(StreamStep):
 
     A subclass implements ``_fit_one(window, stream)``, returning a stream's
     JSON-able state, and ``_predict(window, stream, state)``, returning the
-    forecast's mean and either its standard deviation, ``{q: values}`` for each
-    requested quantile, or ``None`` when it defines quantiles through
-    ``_quantile``.
+    forecast's mean and either its standard deviation or ``{q: values}`` for each
+    requested quantile (``None`` only when no quantiles are requested).
     """
 
     horizon: Duration = Field(
@@ -139,10 +149,7 @@ class ForecastStep(StreamStep):
         ),
     )
 
-    @field_validator("exog", mode="before")
-    @classmethod
-    def _one_exog_is_a_list(cls, value: Any) -> Any:
-        return (value,) if isinstance(value, str) else value
+    _one_exog_is_a_list = field_validator("exog", mode="before")(one_is_a_list)
 
     @field_validator("quantiles")
     @classmethod
@@ -166,51 +173,50 @@ class ForecastStep(StreamStep):
 
     # -- the window -------------------------------------------------------------
 
-    def _window(self, sf: SignalFrame) -> _Window:
+    def _window(self, sf: SignalFrame, *, ahead: bool = True) -> _Window:
+        """Return where the forecast is made.
+
+        With ``ahead`` (``transform``), the index is extended to cover the
+        horizon, and the exog streams must have values over it. Without
+        (``fit``), the window is only the history: a model is fitted on the past,
+        so the training data needn't reach past the targets' last value.
+        """
         check_streams(sf, self.streams)
         check_streams(sf, self.exog, field="exog")
         index = sf.index
-        if len(index) < 2:
-            raise SignalDataError(
-                f"{self.kind}: the data needs at least two timestamps on a regular "
-                "grid."
-            )
-        diffs = np.unique(np.diff(index.asi8))
-        if len(diffs) != 1:
-            raise SignalDataError(
-                f"{self.kind} needs a regular time index (one spacing between all "
-                "samples); run align or resample first."
-            )
-        step = pd.Timedelta(int(diffs[0]), unit="ns")
+        step = regular_step(index, kind=self.kind)
         horizon = to_timedelta(self.horizon)
-        n_ahead, remainder = divmod(horizon, step)
-        if remainder != pd.Timedelta(0):
-            raise SignalConfigError(
-                f"horizon {self.horizon} isn't a whole number of the data's {step} "
-                "steps.",
-                field="horizon",
-            )
+        n_ahead = whole_steps(
+            horizon, step, what=f"horizon {self.horizon}", field="horizon"
+        )
         issue = self._issue_time(sf)
-        offset, remainder = divmod(issue - index[0], step)
-        if remainder != pd.Timedelta(0) or issue < index[0]:
-            raise SignalConfigError(
-                f"issue_time {issue} isn't on the data's {step} grid starting "
-                f"{index[0]}.",
-                field="issue_time",
-            )
+        off_grid = (
+            f"issue_time {issue} isn't on the data's {step} grid starting {index[0]}."
+        )
+        if issue < index[0]:
+            raise SignalConfigError(off_grid, field="issue_time")
+        offset = whole_steps(
+            issue - index[0],
+            step,
+            what="issue_time",
+            field="issue_time",
+            error=off_grid,
+        )
+        n_history = offset + 1
+        if not ahead:
+            return _Window(sf, issue, step, n_history, np.arange(0))
         end = issue + horizon
         if end > index[-1]:
             extra = pd.date_range(index[-1] + step, end, freq=step)
             values = sf.values.reindex(index.append(extra))
             flags = sf.flags.reindex(values.index, fill_value=_NOT_A_SAMPLE)
             sf = sf.evolve(values=values, flags=flags.astype(FLAG_DTYPE))
-        n_history = int(offset) + 1
-        future = np.arange(n_history, n_history + int(n_ahead))
+        future = np.arange(n_history, n_history + n_ahead)
         window = _Window(sf, issue, step, n_history, future)
         for col in self.exog:
-            ahead = window.column(col)[future]
-            if np.isnan(ahead).any():
-                when = sf.index[future[np.isnan(ahead)][0]]
+            known = window.column(col)[future]
+            if np.isnan(known).any():
+                when = sf.index[future[np.isnan(known)][0]]
                 raise SignalDataError(
                     f"{self.kind}: exog stream {col!r} has no value at {when}, within "
                     f"the horizon. Values known ahead must be in the data up to "
@@ -239,7 +245,7 @@ class ForecastStep(StreamStep):
 
     def fit(self, sf: SignalFrame) -> dict[str, Any]:
         """Learn each target's model from the training data up to the issue time."""
-        window = self._window(sf)
+        window = self._window(sf, ahead=False)
         states = {col: self._fit_one(window, col) for col in self.streams}
         out: dict[str, Any] = {"streams": {c: s for c, s in states.items()}}
         metrics = {c: s.pop("metrics") for c, s in states.items() if "metrics" in s}
@@ -247,8 +253,33 @@ class ForecastStep(StreamStep):
             out["metrics"] = metrics
         return out
 
+    def _check_quantile_names(self, sf: SignalFrame) -> None:
+        """Raise if a quantile stream would overwrite one of the input's streams.
+
+        A stream that holds only forecast values (every value it has is flagged
+        ``FORECAST``) is an earlier forecast's output, e.g. when a fitted
+        pipeline runs again on its own output, and is replaced.
+        """
+        for col in self.streams:
+            for q in self.quantiles:
+                name = quantile_column(col, q)
+                if name not in sf:
+                    continue
+                present = sf.values[name].notna().to_numpy()
+                forecast = sf.has_flag(Flag.FORECAST)[name].to_numpy()
+                if (forecast | ~present).all():
+                    continue
+                raise SignalConfigError(
+                    f"the data already has a stream {name!r}, and the {q} quantile "
+                    f"of the {col!r} forecast would overwrite it. Rename that stream "
+                    "(a rename step before this one) or drop that quantile.",
+                    field="quantiles",
+                    value=name,
+                )
+
     def transform(self, sf: SignalFrame, state: Mapping[str, Any]) -> SignalFrame:
         """Write the forecast into the rows after the issue time."""
+        self._check_quantile_names(sf)
         window = self._window(sf)
         frame = window.frame
         values = frame.values
@@ -267,11 +298,7 @@ class ForecastStep(StreamStep):
             for q in self.quantiles:
                 name = quantile_column(col, q)
                 bound = np.full(len(frame), np.nan)
-                if sd is None:
-                    bound[window.future] = self._quantile(
-                        state["streams"][col], q, mean
-                    )
-                elif isinstance(sd, Mapping):
+                if isinstance(sd, Mapping):
                     bound[window.future] = sd[q]
                 else:
                     bound[window.future] = mean + _normal_ppf(q) * sd
@@ -295,11 +322,6 @@ class ForecastStep(StreamStep):
     def _predict(
         self, window: _Window, stream: str, state: Mapping[str, Any]
     ) -> tuple[np.ndarray, np.ndarray | Mapping[float, np.ndarray] | None]:
-        raise NotImplementedError  # pragma: no cover
-
-    def _quantile(
-        self, state: Mapping[str, Any], q: float, mean: np.ndarray
-    ) -> np.ndarray:
         raise NotImplementedError  # pragma: no cover
 
 
@@ -380,14 +402,12 @@ class SeasonalNaive(ForecastStep):
         return self
 
     def _period(self, window: _Window) -> int:
-        m, remainder = divmod(to_timedelta(self.season), window.step)
-        if remainder != pd.Timedelta(0):
-            raise SignalConfigError(
-                f"season {self.season} isn't a whole number of the data's "
-                f"{window.step} steps.",
-                field="season",
-            )
-        return int(m)
+        return whole_steps(
+            to_timedelta(self.season),
+            window.step,
+            what=f"season {self.season}",
+            field="season",
+        )
 
     def _fit_one(self, window: _Window, stream: str) -> dict[str, Any]:
         m = self._period(window)
@@ -443,7 +463,7 @@ class Structural(ForecastStep):
     level: Literal["local_level", "local_linear_trend"] = Field(
         "local_level", description="How the underlying level moves."
     )
-    seasonal: tuple[SeasonalTerm, ...] = Field(
+    seasonal: tuple[CycleTerm, ...] = Field(
         (), description="Repeating cycles, e.g. [{period: 1D, harmonics: 2}]."
     )
     autoregressive: int = Field(
@@ -460,15 +480,9 @@ class Structural(ForecastStep):
                 f"structural: exog stream {self.exog[col]!r} has no value at "
                 f"{window.frame.index[row]}; fill it first (fs.impute)."
             )
-        seasonal = [
-            {"period": to_timedelta(t.period) / window.step, "harmonics": t.harmonics}
-            for t in self.seasonal
-        ]
-        level = {"local_level": "llevel", "local_linear_trend": "lltrend"}[self.level]
         model = cls(
             window.history(stream),
-            level=level,
-            freq_seasonal=seasonal or None,
+            **structural_args(self.level, self.seasonal, window.step),
             autoregressive=self.autoregressive or None,
             exog=exog[:n] if self.exog else None,
         )
@@ -532,7 +546,7 @@ class Regression(ForecastStep):
     """
 
     kind: Literal["forecast_regression"] = "forecast_regression"
-    fourier: tuple[FourierTerm, ...] = Field(
+    fourier: tuple[CycleTerm, ...] = Field(
         (), description="Cycles to model, e.g. [{period: 1D, harmonics: 3}]."
     )
     lags: tuple[Duration, ...] = Field(
@@ -567,10 +581,9 @@ class Regression(ForecastStep):
             raise ValueError(f"regression needs a linear model, not {value!r}")
         return value
 
-    @field_validator("lags", "past", "past_lags", mode="before")
-    @classmethod
-    def _one_is_a_list(cls, value: Any) -> Any:
-        return (value,) if isinstance(value, str) else value
+    _one_is_a_list = field_validator("lags", "past", "past_lags", mode="before")(
+        one_is_a_list
+    )
 
     @model_validator(mode="after")
     def _has_inputs(self) -> Regression:
@@ -594,22 +607,15 @@ class Regression(ForecastStep):
         return self
 
     def _shifts(self, window: _Window, lags: Sequence[str], field: str) -> list[int]:
-        shifts = []
-        for lag in lags:
-            periods, remainder = divmod(to_timedelta(lag), window.step)
-            if remainder != pd.Timedelta(0):
-                raise SignalConfigError(
-                    f"lag {lag} isn't a whole number of the data's {window.step} "
-                    "steps.",
-                    field=field,
-                )
-            shifts.append(int(periods))
-        return shifts
+        return [
+            whole_steps(to_timedelta(lag), window.step, what=f"lag {lag}", field=field)
+            for lag in lags
+        ]
 
     def _fixed_inputs(self, window: _Window) -> np.ndarray:
         """Inputs that don't depend on the forecast: cycles, exog, past streams."""
         check_streams(window.frame, self.past, field="past")
-        terms = [(to_timedelta(t.period), t.harmonics) for t in self.fourier]
+        terms = [(to_timedelta(t.period), t.pairs(3)) for t in self.fourier]
         parts = [fourier_terms(window.frame.index, terms), self._exog_matrix(window)]
         for shift in self._shifts(window, self.past_lags, "past_lags"):
             for col in self.past:
@@ -656,19 +662,8 @@ class Regression(ForecastStep):
                 f"regression: an input of the {stream!r} forecast is missing at {when} "
                 "(a lagged value or a past stream). Fill gaps first (fs.impute)."
             )
-        return mean, None
-
-    def _quantile(self, state, q, mean):
-        return mean + state["residual_quantiles"][str(q)]
+        offsets = state["residual_quantiles"]
+        return mean, {q: mean + offsets[str(q)] for q in self.quantiles}
 
 
-def __getattr__(name: str) -> type:
-    """Return the registered forecaster called ``name`` (a registered method)."""
-    if name.startswith("_"):
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from flexsignal.steps.registered import registered_class
-
-    cls = registered_class("forecaster", name)
-    if cls is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return cls
+__getattr__ = registered_lookup(__name__, "forecaster")

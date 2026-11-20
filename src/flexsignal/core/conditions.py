@@ -48,6 +48,7 @@ from pydantic import AfterValidator
 
 from flexsignal.core.exceptions import SignalConfigError
 from flexsignal.core.flags import Flag, parse_flags
+from flexsignal.core.times import check_duration
 
 __all__ = [
     "CONDITION_FUNCTIONS",
@@ -151,11 +152,6 @@ def _parse(expression: str) -> tuple[ast.Expression, dict[str, str]]:
             f"the expression is {len(expression)} characters long; the limit is "
             f"{MAX_CONDITION_LENGTH}."
         )
-    if "@" in expression:
-        raise ValueError(
-            "expressions may refer only to stream names; '@' variable references "
-            "are not allowed."
-        )
     # Backticked names may hold any characters; swap each for a plain placeholder.
     quoted: dict[str, str] = {}
 
@@ -165,6 +161,11 @@ def _parse(expression: str) -> tuple[ast.Expression, dict[str, str]]:
         return name
 
     source = _BACKTICKED.sub(_placeholder, expression).strip()
+    if "@" in source:
+        raise ValueError(
+            "expressions may refer only to stream names; '@' variable references "
+            "are not allowed (put a stream name containing '@' in backticks)."
+        )
     # As in pandas.eval, & and | are and/or, with their low precedence.
     source = source.replace("&", " and ").replace("|", " or ")
     try:
@@ -332,7 +333,7 @@ class _Checker:
                     'held(C == 0, "30min").'
                 )
             self.expect(args[0], "bool", "held()")
-            _check_duration(args[1].value)  # type: ignore[attr-defined]
+            _held_duration(args[1].value)  # type: ignore[attr-defined]
             return "bool"
         if name in ("valid", "is_raw"):
             if len(args) != 1:
@@ -357,16 +358,11 @@ def _is_str(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
-def _check_duration(text: str) -> pd.Timedelta:
+def _held_duration(text: str) -> pd.Timedelta:
     try:
-        delta = pd.Timedelta(text)
-    except (TypeError, ValueError):
-        raise ValueError(
-            f"{text!r} is not a duration; use e.g. '30min' or '2h'."
-        ) from None
-    if delta < pd.Timedelta(0):
-        raise ValueError(f"held() needs a duration of 0 or more, got {text!r}.")
-    return delta
+        return check_duration(text, allow_zero=True)
+    except ValueError as exc:
+        raise ValueError(f"held(): {exc}.") from None
 
 
 def _check(
@@ -490,7 +486,17 @@ class _Evaluator:
                 return float(self.parameters[node.id])
             return self.column(node.id)
         if isinstance(node, ast.Constant):
-            return node.value
+            if isinstance(node.value, bool):
+                return node.value
+            # Integer constants become floats, so they behave as in the
+            # float64 data: no int64 overflow, no int ** -n error, x // 0 = inf.
+            try:
+                return float(node.value)
+            except OverflowError:
+                raise ValueError(
+                    f"the number {ast.unparse(node)[:20]}... is too large; write "
+                    "it in scientific notation, e.g. 1e30."
+                ) from None
         if isinstance(node, ast.BoolOp):
             op = _BOOL_OPS[type(node.op)]
             result = self.run(node.values[0])
@@ -523,8 +529,14 @@ class _Evaluator:
         if name in _FUNCTIONS:
             return _FUNCTIONS[name][0](*(self.run(a) for a in node.args))
         if name == "held":
+            if not isinstance(self.values.index, pd.DatetimeIndex):
+                raise ValueError(
+                    "held() measures time, so the data needs timestamps: evaluate "
+                    "the condition on a SignalFrame, or a DataFrame with a "
+                    f"DatetimeIndex (got a {type(self.values.index).__name__})."
+                )
             cond = np.broadcast_to(self.run(node.args[0]), (self.n,))
-            delta = _check_duration(node.args[1].value)  # type: ignore[attr-defined]
+            delta = _held_duration(node.args[1].value)  # type: ignore[attr-defined]
             return _held(cond, self.values.index, delta)
         if name == "valid":
             return ~np.isnan(self.column(node.args[0].id))  # type: ignore[attr-defined]

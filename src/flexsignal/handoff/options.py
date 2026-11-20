@@ -13,6 +13,7 @@ from typing import Literal
 import pandas as pd
 from pydantic import Field, field_validator, model_validator
 
+from flexsignal.core.times import check_timestamp
 from flexsignal.spec.models import StrictModel
 
 __all__ = ["FitPrep", "FitResample", "GridOptions", "GridResample"]
@@ -179,3 +180,57 @@ class FitPrep(StrictModel):
             "Refuse more rows than this (a guard against running out of memory)."
         ),
     )
+    start: str | None = Field(
+        None,
+        description=(
+            "Keep rows from this time on (ISO 8601; without a zone it means UTC)."
+        ),
+    )
+    end: str | None = Field(
+        None,
+        description="Keep rows before this time (ISO 8601; without a zone, UTC).",
+    )
+    rename: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Column -> the name the regressor or model expects, e.g. "
+            "{'feed': 'flow_in_feed'}; applied last, units included."
+        ),
+    )
+    timezone: str | None = Field(
+        None,
+        description=(
+            "Give the result on this zone's wall clock, without a zone (naive), as "
+            "to_grid and flex-pse models use it; e.g. America/Los_Angeles or UTC. "
+            "Default: keep the UTC index."
+        ),
+    )
+
+    @field_validator("start", "end")
+    @classmethod
+    def _a_timestamp(cls, value: str | None) -> str | None:
+        if value is not None:
+            check_timestamp(value)
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _a_zone(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                zoneinfo.ZoneInfo(value)
+            except (zoneinfo.ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(f"unknown time zone {value!r}") from exc
+        return value
+
+    @model_validator(mode="after")
+    def _start_before_end(self) -> FitPrep:
+        if self.start and self.end and _utc(self.start) >= _utc(self.end):
+            raise ValueError(f"start {self.start} must be before end {self.end}")
+        return self
+
+
+def _utc(value: str) -> pd.Timestamp:
+    """Return a timestamp string as UTC; one without a zone means UTC."""
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")

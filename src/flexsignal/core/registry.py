@@ -3,14 +3,16 @@
 Built-in steps register themselves when :mod:`flexsignal.steps` is imported,
 which ``import flexsignal`` always does. Third-party packages add steps through
 the ``flexsignal.steps`` entry-point group. Each entry point names either a step
-class or a module that registers its steps on import.
+class or a module that registers its steps on import. One that fails to load
+is skipped with a warning, so it can't hide the others.
 """
 
 from __future__ import annotations
 
+import warnings
 from importlib.metadata import entry_points
 
-from flexsignal.core.exceptions import SignalConfigError
+from flexsignal.core.exceptions import SignalConfigError, SignalWarning
 
 STEP_ENTRY_POINT_GROUP = "flexsignal.steps"
 """Entry-point group through which other packages register step classes."""
@@ -58,9 +60,21 @@ def _load_entry_points() -> None:
         return
     _entry_points_loaded = True
     for ep in entry_points(group=STEP_ENTRY_POINT_GROUP):
-        loaded = ep.load()
-        if isinstance(loaded, type):
-            register_step(loaded)
+        # One broken plugin must not hide the others, or every later lookup.
+        try:
+            loaded = ep.load()
+            if isinstance(loaded, type):
+                register_step(loaded)
+        except Exception as exc:  # a plugin can fail in any way on import
+            target = getattr(ep, "value", None) or ep.name
+            warnings.warn(
+                f"could not load the {STEP_ENTRY_POINT_GROUP!r} entry point "
+                f"{ep.name!r} ({target}): {type(exc).__name__}: {exc}. The steps it "
+                "provides are unavailable; fix or reinstall the package that "
+                "provides it, or uninstall it.",
+                SignalWarning,
+                stacklevel=3,
+            )
 
 
 def get_step_class(kind: str) -> type:
@@ -117,7 +131,11 @@ def unregister_step(kind: str) -> None:
 
 
 def load_entry_points() -> None:
-    """Load the steps that installed packages provide, once."""
+    """Load the steps that installed packages provide, once.
+
+    An entry point that fails to load is skipped with a :class:`SignalWarning`
+    naming it and the error; the others still load.
+    """
     _load_entry_points()
 
 

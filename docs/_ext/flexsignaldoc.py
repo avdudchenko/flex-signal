@@ -305,7 +305,7 @@ def collect_model_rows() -> list[list[str]]:
                 f"``{option.option}``",
                 ", ".join(f"``{name}``" for name in option.tested),
                 f"`every {option.library} model <{option.catalogue}>`__, by class "
-                f"name; settings in ``{option.params}``",
+                "name; settings in ``params``",
                 option.note,
             ]
         )

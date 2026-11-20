@@ -56,7 +56,8 @@ I/O.
 ## Versions, migrations and errors
 
 - `schema_version` is required in JSON. {func}`~flexsignal.spec.load_spec` refuses specs newer than the installed
-  release, and upgrades older ones through `flexsignal.spec.MIGRATIONS`.
+  release, and upgrades older ones through `flexsignal.spec.MIGRATIONS`. Released schemas are frozen: see
+  {doc}`stability` and {doc}`../how_to/migrate_a_spec`.
 - Errors say which field is wrong, e.g. `steps.2.window: '15 minutes' is not a duration`. They carry the same
   path in `error.field`, so tools such as flex-orchestrator can point at it.
 - `{"$source": "file.json"}` anywhere in a spec is replaced by that file's contents. The path is relative to the

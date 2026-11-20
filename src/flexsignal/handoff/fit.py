@@ -21,11 +21,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from flexsignal.core.exceptions import SignalConfigError, SignalDataError
 from flexsignal.core.frame import SignalFrame
-from flexsignal.handoff.options import FitPrep
+from flexsignal.handoff.options import FitPrep, _utc
 
 __all__ = ["FitData", "data_hash", "fit_data", "split_holdout"]
 
@@ -139,6 +140,17 @@ def fit_data(
     steps: list[dict[str, Any]] = [
         {"step": "align", "how": prep.align, "rows": len(data)}
     ]
+    if prep.start is not None or prep.end is not None:
+        keep = np.ones(len(data), dtype=bool)
+        index = _as_utc(data.index)
+        if prep.start is not None:
+            keep &= index >= _utc(prep.start)
+        if prep.end is not None:
+            keep &= index < _utc(prep.end)
+        data = data[keep]
+        steps.append(
+            {"step": "window", "start": prep.start, "end": prep.end, "rows": len(data)}
+        )
     if len(data) > prep.max_rows:
         raise SignalDataError(
             f"The selected data has {len(data)} rows, more than max_rows="
@@ -157,9 +169,39 @@ def fit_data(
     data = _gaps(data, prep, steps)
     if data.empty:
         raise SignalDataError("No rows are left to fit after preparing the data.")
+    if prep.timezone is not None:
+        data = data.set_axis(
+            _as_utc(data.index).tz_convert(prep.timezone).tz_localize(None)
+        )
+        steps.append({"step": "timezone", "timezone": prep.timezone})
+    if prep.rename:
+        unknown = sorted(set(prep.rename) - set(every))
+        if unknown:
+            raise SignalConfigError(
+                f"rename names columns {unknown} that aren't in the data "
+                f"({every}).",
+                field="rename",
+            )
+        renamed = [prep.rename.get(c, c) for c in every]
+        clashes = sorted({c for c in renamed if renamed.count(c) > 1})
+        if clashes:
+            raise SignalConfigError(
+                f"rename gives several columns the name {clashes}.", field="rename"
+            )
+        data = data.rename(columns=prep.rename)
+        units = {prep.rename.get(c, c): u for c, u in units.items()}
+        x_columns = [prep.rename.get(c, c) for c in x_columns]
+        y_columns = [prep.rename.get(c, c) for c in y_columns]
+        steps.append({"step": "rename", "columns": dict(prep.rename)})
     prepared = FitData(X=data[x_columns], y=data[y_columns], units=units, steps=steps)
     prepared.data_hash = data_hash(prepared.X, prepared.y)
     return prepared
+
+
+def _as_utc(index: pd.Index) -> pd.DatetimeIndex:
+    """Return a time index in UTC; a naive one is taken to be UTC already."""
+    index = pd.DatetimeIndex(index)
+    return index.tz_localize("UTC") if index.tz is None else index.tz_convert("UTC")
 
 
 def _gaps(

@@ -2,9 +2,17 @@
 
 flex-signal needs Python 3.11 or newer.
 
+## From PyPI
+
+```bash
+pip install flex-signal
+```
+
+Add extras in brackets, e.g. `pip install "flex-signal[anomaly,units]"` (see below).
+
 ## From source
 
-flex-signal is not on PyPI yet. Install it from a clone:
+To work on flex-signal, or to use unreleased changes, install it from a clone:
 
 ```bash
 git clone https://github.com/flex-pse/flex-signal.git

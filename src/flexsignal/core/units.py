@@ -15,7 +15,7 @@ import numpy as np
 
 from flexsignal.core.exceptions import SignalBackendError, SignalConfigError
 
-__all__ = ["convert", "same_units"]
+__all__ = ["convert"]
 
 
 @lru_cache(maxsize=1)
@@ -75,8 +75,3 @@ def convert(values: Any, from_units: str, to_units: str) -> np.ndarray | float:
             f"can't convert {from_units!r} to {to_units!r}: {exc}.", value=to_units
         ) from None
     return float(out) if scalar else np.asarray(out, dtype="float64")
-
-
-def same_units(a: str | None, b: str | None) -> bool:
-    """Return True if two unit strings are written the same way (no conversion)."""
-    return (a or None) == (b or None)

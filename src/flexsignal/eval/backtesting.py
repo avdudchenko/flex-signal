@@ -21,8 +21,8 @@ from flexsignal.core.exceptions import SignalConfigError, SignalDataError
 from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
 from flexsignal.eval.scores import metrics
-from flexsignal.pipeline import DataLike, Pipeline, bind_inputs
-from flexsignal.spec import SignalSpec, load_spec
+from flexsignal.pipeline import DataLike, Pipeline, bind_inputs, resolve_spec
+from flexsignal.spec import SignalSpec
 from flexsignal.spec.models import to_timedelta
 from flexsignal.steps.forecast import ForecastStep, quantile_column
 
@@ -36,9 +36,10 @@ class BacktestResult:
     """What :func:`backtest` returns."""
 
     scores: pd.DataFrame
-    """One row per method, stream and fold: ``issue_time``, ``n`` (values scored),
-    ``rmse``, ``mae``, ``mape``, and ``coverage`` (the share of values between the
-    lowest and highest quantile; NaN without quantiles)."""
+    """One row per method, stream and fold: ``issue_time``, ``n`` (values scored:
+    an actual value and a forecast), ``missing`` (actual values the method left
+    without a forecast), ``rmse``, ``mae``, ``mape``, and ``coverage`` (the share
+    of values between the lowest and highest quantile; NaN without quantiles)."""
     forecasts: pd.DataFrame
     """Every forecast value: ``method``, ``stream``, ``fold``, ``issue_time``,
     ``time``, ``lead`` (time after the issue time), ``actual``, ``forecast``, and
@@ -157,6 +158,11 @@ def _fold_data(
     return SignalFrame(values, flags, sf.meta)
 
 
+def _suffix(stream: str, q: float) -> str:
+    """Return a quantile's column name in the forecasts table, e.g. ``q10``."""
+    return quantile_column(stream, q).rsplit("__", 1)[1]
+
+
 def backtest(
     spec: SignalSpec | Mapping[str, Any] | str | Path,
     data: DataLike = None,
@@ -168,6 +174,7 @@ def backtest(
     baseline: str | None = None,
     base_dir: str | Path | None = None,
     progress: Callable[[float, str], None] | None = None,
+    plugins: str | Sequence[str] = (),
 ) -> BacktestResult:
     """Score a pipeline's forecast step on the data's past, fold by fold.
 
@@ -196,8 +203,12 @@ def backtest(
         baseline: The method :meth:`BacktestResult.summary` measures skill against,
             by its name (``name``, or else ``kind``). Default: the first of
             ``compare``.
-        base_dir: Directory for relative paths in the spec.
+        base_dir: Directory for relative paths in the spec. Default: the spec
+            file's directory for a path, else the working directory (as
+            :func:`flexsignal.run`).
         progress: Called as ``progress(fraction, message)`` after each fold.
+        plugins: Modules to import first, so the methods they register are
+            available (see :func:`flexsignal.load_plugins`).
 
     Returns:
         A :class:`BacktestResult`.
@@ -207,10 +218,7 @@ def backtest(
             ``compare`` step doesn't match it, or two methods share a name.
         SignalDataError: If the data is too short for the folds.
     """
-    root = Path(base_dir) if base_dir is not None else Path.cwd()
-    resolved = (
-        load_spec(spec, base_dir=root) if not isinstance(spec, SignalSpec) else spec
-    )
+    resolved, root = resolve_spec(spec, base_dir, plugins)
     position = _forecast_step(resolved)
     main = resolved.steps[position]
     if folds < 1:
@@ -256,13 +264,17 @@ def backtest(
         Pipeline.from_spec(before).fit_transform(data_sf)[1] if position else data_sf
     )
     times = _issue_times(reference, main, folds, step_every)
+    # Streams known ahead stay visible after each issue time: the exog of every
+    # method compared. A step can't take its own target as exog, and compared
+    # steps share the targets, so no target leaks.
+    known_ahead = {s for m in methods for s in m.exog}
 
     score_rows: list[dict[str, Any]] = []
     forecast_rows: list[pd.DataFrame] = []
     total = len(times) * len(methods)
     done = 0
     for fold, issue in enumerate(times):
-        fold_sf = _fold_data(data_sf, issue, horizon, set(main.exog), span)
+        fold_sf = _fold_data(data_sf, issue, horizon, known_ahead, span)
         for label, method in zip(labels, methods, strict=True):
             step = method.model_copy(update={"issue_time": issue.isoformat()})
             steps = list(single.steps)
@@ -294,17 +306,17 @@ def backtest(
                 )
                 for q in step.quantiles:
                     column = quantile_column(stream, q)
-                    frame[column.rsplit("__", 1)[1]] = result.values[column].to_numpy()[
-                        rows
-                    ]
+                    frame[_suffix(stream, q)] = result.values[column].to_numpy()[rows]
                 forecast_rows.append(frame)
-                scored = ~np.isnan(actual)
+                known = ~np.isnan(actual)
+                scored = known & ~np.isnan(predicted)
                 row = {
                     "method": label,
                     "stream": stream,
                     "fold": fold,
                     "issue_time": issue,
                     "n": int(scored.sum()),
+                    "missing": int((known & ~scored).sum()),
                     "rmse": np.nan,
                     "mae": np.nan,
                     "mape": np.nan,
@@ -315,8 +327,8 @@ def backtest(
                         metrics(pd.Series(actual[scored]), pd.Series(predicted[scored]))
                     )
                 if len(step.quantiles) >= 2 and scored.any():
-                    low = frame[f"q{round(step.quantiles[0] * 100):02d}"].to_numpy()
-                    high = frame[f"q{round(step.quantiles[-1] * 100):02d}"].to_numpy()
+                    low = frame[_suffix(stream, step.quantiles[0])].to_numpy()
+                    high = frame[_suffix(stream, step.quantiles[-1])].to_numpy()
                     inside = (actual >= low) & (actual <= high)
                     row["coverage"] = float(inside[scored].mean())
                 score_rows.append(row)

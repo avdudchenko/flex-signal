@@ -30,6 +30,7 @@ from flexsignal.spec.models import Duration, Quantity, to_timedelta
 from flexsignal.steps._base import (
     StreamStep,
     check_streams,
+    registered_lookup,
     regular_step,
     remove_values,
     seconds,
@@ -123,11 +124,25 @@ class RateOfChange(StreamStep):
     after it, because that point is compared with the last good value before the
     spike. A genuine step change is accepted once enough time has passed for the
     allowed rate to cover it.
+
+    With ``reset_after``, a run of that many rejected values in a row that agree
+    with each other (each within ``max_rate`` of the one before) is taken as a new
+    level rather than a spike: the run is kept and becomes the reference. If the
+    old reference was the stream's first value, nothing was accepted after it,
+    so it was the outlier and is flagged instead.
     """
 
     kind: Literal["rate_of_change"] = "rate_of_change"
     max_rate: float = Field(gt=0, description="Largest allowed change per `per`.")
     per: Duration = Field("1h", description="Time unit of max_rate, e.g. 1h or 1min.")
+    reset_after: int | None = Field(
+        None,
+        ge=2,
+        description=(
+            "After this many rejected values in a row that agree with each other, "
+            "accept them as a new level. Default: never."
+        ),
+    )
 
     def transform(self, sf: SignalFrame, state: Mapping[str, Any]) -> SignalFrame:
         """Flag values that change too fast (see the class docstring)."""
@@ -138,19 +153,37 @@ class RateOfChange(StreamStep):
         remove = {}
         for col in self.streams:
             arr = values[col].to_numpy()
-            reject = np.zeros(len(arr), dtype=bool)
-            last_v = last_t = None
-            for i in np.flatnonzero(~np.isnan(arr)):
-                if last_v is not None:
-                    rate = abs(arr[i] - last_v) / ((t[i] - last_t) / per_s)
-                    if rate > self.max_rate:
-                        reject[i] = True
-                        continue
-                last_v, last_t = arr[i], t[i]
-            remove[col] = reject
+            remove[col] = self._reject(arr, t, per_s)
         return remove_values(
             sf, pd.DataFrame(remove, index=sf.index), Flag.RATE_OF_CHANGE
         )
+
+    def _reject(self, arr: np.ndarray, t: np.ndarray, per_s: float) -> np.ndarray:
+        def too_fast(i: int, j: int) -> bool:
+            return abs(arr[j] - arr[i]) / ((t[j] - t[i]) / per_s) > self.max_rate
+
+        reject = np.zeros(len(arr), dtype=bool)
+        valid = np.flatnonzero(~np.isnan(arr))
+        if not len(valid):
+            return reject
+        # The first valid value is the first reference, even if it is bad; with
+        # reset_after, a run that disagrees with it can replace it.
+        anchor = first = valid[0]
+        run: list[int] = []
+        for i in valid[1:]:
+            if not too_fast(anchor, i):
+                anchor, run = i, []
+                continue
+            reject[i] = True
+            if self.reset_after is None:
+                continue
+            run = run + [i] if run and not too_fast(run[-1], i) else [i]
+            if len(run) >= self.reset_after:
+                reject[run] = False
+                if anchor == first:  # nothing was ever accepted after it
+                    reject[first] = True
+                anchor, run = i, []
+        return reject
 
 
 @register_step
@@ -324,9 +357,9 @@ class Expression(StreamStep):
     invalid_when: Condition = Field(
         description="Condition over stream names, e.g. 'pressure < 0'."
     )
-    flag: Literal["MANUAL", "OUT_OF_RANGE", "RATE_OF_CHANGE", "OUTLIER", "STUCK"] = (
-        Field("MANUAL", description="Which flag to set on rejected values.")
-    )
+    flag: Literal[
+        "MANUAL", "OUT_OF_RANGE", "RATE_OF_CHANGE", "OUTLIER", "STUCK", "EXCLUDED"
+    ] = Field("MANUAL", description="Which flag to set on rejected values.")
 
     def transform(self, sf: SignalFrame, state: Mapping[str, Any]) -> SignalFrame:
         """Flag values where the condition holds."""
@@ -495,13 +528,4 @@ class Detotalize(StreamStep):
         return sf.evolve(values=values, flags=flags, meta=meta)
 
 
-def __getattr__(name: str) -> type:
-    """Return the registered cleaner called ``name`` (a registered method)."""
-    if name.startswith("_"):
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from flexsignal.steps.registered import registered_class
-
-    cls = registered_class("cleaner", name)
-    if cls is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return cls
+__getattr__ = registered_lookup(__name__, "cleaner")

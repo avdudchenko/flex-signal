@@ -168,7 +168,7 @@ sphinx-build -W --keep-going -b html docs docs/_build
 ## Writing a Tutorial
 
 Tutorials are [marimo](https://marimo.io) notebooks in `tutorials/`, numbered `NN_short_name.py` in teaching
-order. Each milestone adds the tutorials for what it ships, in the same PR as the code (PLAN.md D12). Install
+order. Each milestone adds the tutorials for what it ships, in the same PR as the code. Install
 the tools with `pip install -e ".[tutorials]"` and edit with `marimo edit tutorials/NN_name.py`.
 
 1. **Teach one idea per section.** Start from the previous tutorial and build up. Write the prose in `mo.md`
@@ -194,6 +194,11 @@ the tools with `pip install -e ".[tutorials]"` and edit with `marimo edit tutori
    ```
 
    Add the tutorial to the table in `docs/tutorials/index.md`, and to its milestone in PLAN.md §8.
+8. **A tutorial that needs something CI can't install yet** (for example a flex-pse feature only on its `main`)
+   lists it with `# needs-module: <module>` lines, so its test skips, and is marked `# docs-page: prerendered`.
+   Commit its page, rendered locally where everything is installed:
+   `marimo export html tutorials/NN_name.py -o docs/tutorials/prerendered/NN_name.html`. Re-render it whenever the
+   tutorial changes, and drop the marker once CI can run it.
 
 ## Submitting a Pull Request
 
@@ -207,9 +212,17 @@ the tools with `pip install -e ".[tutorials]"` and edit with `marimo edit tutori
 
 ## Spec schema versioning
 
-- Any change to `SignalSpec` bumps its `schema_version` and regenerates the committed JSON Schema in the same PR.
-- Once a spec version has been released, a breaking change also adds a `MIGRATIONS` hook from the old version. A
-  migration that cannot translate a spec raises an error that names the field and how to fix it.
+Schema 0.1.0 is released and frozen: specs and fitted pipelines saved by any release must keep loading. The rules
+are in [Stability and deprecation](https://flex-pse.github.io/flex-signal/explanation/stability.html); in short:
+
+- Any change to the schema (a new step kind, a new option, a rename) bumps `SCHEMA_VERSION`, regenerates the
+  committed JSON Schema (`python -m flexsignal.spec.schema`), and adds a `MIGRATIONS` entry from the previous
+  version, in the same PR. A purely additive change's migration only sets the new version.
+- Freeze the new version with `python -m flexsignal.spec.tests.freeze`. Never edit an existing
+  `src/flexsignal/spec/tests/frozen/<version>/` directory; the frozen-spec tests fail until these steps are done.
+- A migration that cannot translate a spec raises an error that names the field and how to fix it.
+- Deprecate before removing: a `DeprecationWarning` naming the replacement, for at least one minor release, and an
+  entry under *Deprecated* in the CHANGELOG.
 
 ## Review & Verification by Maintainers
 

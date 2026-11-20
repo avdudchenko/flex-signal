@@ -1,6 +1,6 @@
 # Tutorials
 
-The tutorials teach flex-signal step by step, from a first look at the data to calibration, imputation, forecasting, handing data to flex-pse models, and methods of your own. Each
+The tutorials teach flex-signal step by step, from a first look at the data to calibration, imputation, forecasting, handing data to flex-pse models, methods of your own, and running specs from flex-orchestrator. Each
 one is a [marimo](https://marimo.io) notebook that you can read here or run yourself.
 
 Every tutorial uses flex-signal's synthetic data, with faults injected at known places and the true values
@@ -71,6 +71,21 @@ by mistake, and how close a corrected or filled value is to the truth.
       <td><a href="10_your_own_methods.html">Your own methods</a></td>
       <td>Register a cleaner, an imputer and a model; score them against injected faults and built-in methods;
         run them from a JSON spec; save and reload; what is refused; packaging them as a plugin</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td><a href="11_specs_as_orchestrator_studies.html">A cleaning spec as a flex-orchestrator study</a></td>
+      <td>What an orchestrator wrapper relies on: named input slots, spec hashes, a params model that embeds
+        the spec and its JSON Schema, <code>RunResult</code>, storing a fitted pipeline as a payload, errors
+        with field paths, progress, and spec versions</td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td><a href="12_scheduling_a_biogas_digester.html">Scheduling a biogas digester</a></td>
+      <td>From raw digester data to a scheduled day: cleaning and 15-minute steps, calibrating a gas meter
+        against lab checks, an ARIMA surrogate from <code>fit_data</code>, a feed forecast, and a flex-pse
+        feed-tank-digester-CHP model under a time-of-use tariff, baseline against schedule (needs flex-pse with
+        the ARIMA surrogate: flex-pse <code>main</code>, the next release after 0.3.1)</td>
     </tr>
   </tbody>
 </table>

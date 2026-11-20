@@ -1,7 +1,7 @@
 """to_grid: data lined up with a model's time steps.
 
 Most of these are flex-orchestrator's model_inputs tests, ported as pure-data
-tests with the same data and expected values (FLEX_ORCHESTRATOR_OVERLAP.md §4),
+tests with the same data and expected values,
 so behaviour can't drift when flex-orchestrator switches to these functions.
 """
 

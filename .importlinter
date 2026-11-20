@@ -3,7 +3,7 @@ root_packages =
     flexsignal
 include_external_packages = True
 
-# Layering (PLAN.md §3.1). Higher layers may import lower ones, never the
+# Layering. Higher layers may import lower ones, never the
 # reverse. Siblings separated by "|" must not import each other.
 [importlinter:contract:layers]
 name = core <- {spec | io} <- backends <- steps <- {pipeline | adapters} <- {eval | api | testing | handoff} <- integrations

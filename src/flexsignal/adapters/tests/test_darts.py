@@ -115,9 +115,9 @@ def test_bad_options_fail_on_load_with_the_field(option, value):
 @pytest.mark.parametrize(
     "options, field, words",
     [
-        ({"params": {"nope": 1}}, "params", "'nope' isn't an argument of darts'"),
+        ({"params": {"nope": 1}}, "params", "'nope' isn't an argument of darts"),
         ({"params": {"trend": "sideways"}}, "params", "'trend' of Exponential"),
-        ({"params": {"add_encoders": {}}}, "params", "set by flex-signal"),
+        ({"params": {"add_encoders": {}}}, "params", "flex-signal sets"),
         ({"num_samples": 5}, "num_samples", "between 10 and 10000"),
         ({"season": "soon"}, "season", "isn't a duration"),
         ({"model": "LinearRegressionModel", "season": None}, "params", "needs lags"),

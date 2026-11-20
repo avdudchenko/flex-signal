@@ -31,13 +31,15 @@ import numpy as np
 import pandas as pd
 
 from flexsignal.adapters._common import (
+    Forecast,
     ModelName,
     build_model,
     model_class,
     model_option,
+    quantile_key,
     regular_step,
     require,
-    seed_torch,
+    seeded,
     steps_in,
 )
 from flexsignal.backends import register_backend
@@ -90,7 +92,6 @@ FORECAST_OPTION = model_option(
 # Constructor arguments the adapter sets itself; ``params`` may not set them.
 _MANAGED = frozenset(
     {
-        "self",
         "n_steps",
         "n_features",
         "n_pred_steps",
@@ -518,8 +519,7 @@ def pypots_impute(
     frame = pd.DataFrame(scaled, index=values.index, columns=columns)
     X = to_windows(frame, n_window, stride=n_stride)["X"].astype("float32")
 
-    seed_torch(seed)
-    with _quiet(method) as errors:
+    with seeded(seed), _quiet(method) as errors:
         net = build_model(
             cls,
             {
@@ -553,28 +553,6 @@ def pypots_impute(
 
 
 # -- the forecaster -------------------------------------------------------------------
-
-
-class _PointForecast(dict):
-    """A mean-only forecast that explains why it has no quantiles.
-
-    flex-signal looks up each requested quantile in the returned dict; this one
-    answers that lookup with an error naming the fix, instead of a generic one.
-    """
-
-    def __init__(self, mean: np.ndarray, model: str) -> None:
-        super().__init__(mean=mean)
-        self._model = model
-
-    def __contains__(self, key: object) -> bool:
-        if key == "mean":
-            return True
-        raise SignalConfigError(
-            f"PypotsForecast: model {self._model!r} gives a single forecast, not a "
-            "distribution, so it can't write quantiles. Use model='CSDI', which "
-            "samples one, or remove quantiles.",
-            field="quantiles",
-        )
 
 
 def _forecast_sizes(
@@ -681,7 +659,7 @@ def pypots_forecast(
             untested model; checked against the model when it runs.
 
     Returns:
-        The mean forecast; for CSDI, also ``std`` and quantiles ``q01``-``q99``.
+        The mean forecast; for CSDI, also the quantiles ``q01``-``q99``.
 
     Raises:
         SignalConfigError: If an option is invalid, ``exog`` is set, or
@@ -739,8 +717,7 @@ def pypots_forecast(
     bases = require("pypots.forecasting.base", EXTRA, method=method)
     base = (bases.BaseForecaster, bases.BaseNNForecaster)
     cls = model_class(forecasting, model, FORECAST_OPTION, base=base)
-    seed_torch(seed)
-    with _quiet(method) as errors:
+    with seeded(seed), _quiet(method) as errors:
         net = build_model(
             cls,
             {
@@ -774,11 +751,18 @@ def pypots_forecast(
             out = net.predict({"X": last})["forecasting"]
     out = np.asarray(out, dtype="float64") * std[0] + mean[0]
     if model != "CSDI":
-        return _PointForecast(out.reshape(horizon), model)
+        return Forecast(
+            out.reshape(horizon),
+            None,
+            f"{method}: model {model!r} gives a single forecast, not a "
+            "distribution, so it can't write quantiles. Use model='CSDI', which "
+            "samples one, or remove quantiles.",
+        )
     draws = out.reshape(samples, horizon)  # [1, samples, horizon, 1]
-    result = {"mean": draws.mean(axis=0), "std": draws.std(axis=0)}
+    result = {"mean": draws.mean(axis=0)}
     for percent in range(1, 100):
-        result[f"q{percent:02d}"] = np.quantile(draws, percent / 100, axis=0)
+        q = percent / 100
+        result[quantile_key(q)] = np.quantile(draws, q, axis=0)
     return result
 
 

@@ -6,24 +6,19 @@ used, so an optional library costs nothing until a step needs it. If the library
 is missing, the error says which extra installs it.
 
 flex-signal's own keys live in :mod:`flexsignal.backends.builtin`, which the
-registry loads the first time it is used. Besides registered keys, any
-``"package.module:attribute"`` string resolves directly in Python, which is how
-user code plugs in. Third-party packages register keys through the
-``flexsignal.backends`` entry-point group. Each entry point names a callable
-that is called with no arguments and registers its keys.
+registry loads the first time it is used. Code of your own adds keys with
+:func:`~flexsignal.backends.register_backend`. Only registered keys resolve: a
+key is never treated as an import path, so naming a backend can't import
+arbitrary code.
 """
 
 from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from importlib.metadata import entry_points
 from typing import Any
 
 from flexsignal.core.exceptions import SignalBackendError
-
-BACKEND_ENTRY_POINT_GROUP = "flexsignal.backends"
-"""Entry-point group through which other packages register backends."""
 
 
 @dataclass(frozen=True)
@@ -44,7 +39,6 @@ class BackendInfo:
 
 _BACKENDS: dict[str, BackendInfo] = {}
 _builtins_loaded = False
-_entry_points_loaded = False
 
 
 def register_backend(
@@ -68,8 +62,17 @@ def register_backend(
         The registered :class:`BackendInfo`.
 
     Raises:
-        SignalBackendError: If ``key`` is already registered with another target.
+        SignalBackendError: If ``target`` isn't ``"package.module:attribute"``,
+            or ``key`` is already registered with another target.
     """
+    parts = target.partition(":") if isinstance(target, str) else ("", "", "")
+    module_name, sep, attr = parts
+    if not (sep and module_name and attr):
+        raise SignalBackendError(
+            f"backend target {target!r} must look like 'package.module:attribute', "
+            "e.g. 'scipy.interpolate:PchipInterpolator'.",
+            value=target,
+        )
     _load_builtins()
     info = BackendInfo(key, target, extra, description, docs_url)
     existing = _BACKENDS.get(key)
@@ -91,15 +94,6 @@ def _load_builtins() -> None:
     importlib.import_module("flexsignal.backends.builtin")
 
 
-def _load_entry_points() -> None:
-    global _entry_points_loaded
-    if _entry_points_loaded:
-        return
-    _entry_points_loaded = True
-    for ep in entry_points(group=BACKEND_ENTRY_POINT_GROUP):
-        ep.load()()
-
-
 def _import_target(target: str) -> Any:
     module_name, _, attr = target.partition(":")
     module = importlib.import_module(module_name)
@@ -113,7 +107,7 @@ def get_backend(key: str) -> Any:
     """Return the object a backend key names, importing it on first use.
 
     Args:
-        key: A registered key, or any ``"package.module:attribute"`` string.
+        key: A registered key, e.g. ``"scipy:PchipInterpolator"``.
 
     Returns:
         The imported object (a class, function or module attribute).
@@ -122,22 +116,20 @@ def get_backend(key: str) -> Any:
         SignalBackendError: If the key is unknown, or its library is not installed.
     """
     _load_builtins()
-    if key not in _BACKENDS:
-        _load_entry_points()
     info = _BACKENDS.get(key)
-    target = info.target if info else key
-    module_name, sep, attr = target.partition(":")
-    if not sep or not module_name or not attr:
+    if info is None:
         known = ", ".join(sorted(_BACKENDS))
         raise SignalBackendError(
-            f"unknown backend {key!r}. Use a registered key ({known}) or a "
-            "'package.module:attribute' path.",
+            f"unknown backend key {key!r}; register it first with "
+            f"flexsignal.backends.register_backend. Known keys: {known}.",
             value=key,
         )
+    target = info.target
+    module_name, _, attr = target.partition(":")
     try:
         return _import_target(target)
     except ImportError as exc:
-        if info is not None and info.extra:
+        if info.extra:
             hint = f"install it with `pip install flex-signal[{info.extra}]`"
         else:
             hint = f"install the package that provides {module_name!r}"
@@ -154,5 +146,4 @@ def get_backend(key: str) -> Any:
 def registered_backends() -> list[BackendInfo]:
     """Return every registered backend, sorted by key."""
     _load_builtins()
-    _load_entry_points()
     return [_BACKENDS[k] for k in sorted(_BACKENDS)]

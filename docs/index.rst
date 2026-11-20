@@ -10,13 +10,14 @@ fits, and flex-orchestrator studies.
 
 .. note::
 
-   flex-signal is pre-alpha. Pipelines select, clean, calibrate against a
+   flex-signal is alpha (0.1.0). Pipelines select, clean, calibrate against a
    reference, impute gaps and forecast, from Python or JSON specs, and fitted
    pipelines save as plain JSON. Forecasts are backtested against baselines.
    Methods of your own, and adapters to deep, foundation and anomaly-detection
    libraries, run as steps too.
    Cleaned and forecast data goes into flex-pse models on their own time steps,
-   and is prepared for fitting surrogates. The API may still change before 1.0.
+   and is prepared for fitting surrogates. The spec schema is frozen from 0.1.0,
+   so saved specs keep loading in later releases (:doc:`explanation/stability`).
 
 Start with :doc:`getting_started/ten_minutes` or the :doc:`tutorials/index`, or
 go straight to :doc:`how_to/clean_a_stream`, then

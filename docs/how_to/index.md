@@ -14,5 +14,6 @@ prepare_fit_data
 forecast_and_backtest
 add_your_own_method
 save_and_load_a_fitted_pipeline
+migrate_a_spec
 ```
 

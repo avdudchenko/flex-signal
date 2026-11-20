@@ -19,7 +19,7 @@ from pydantic import BaseModel, ValidationError
 
 from flexsignal.core.exceptions import SignalConfigError
 from flexsignal.core.registry import get_step_class
-from flexsignal.spec.models import SCHEMA_VERSION, SignalSpec
+from flexsignal.spec.models import SCHEMA_VERSION, SignalSpec, _find_non_json
 
 MIGRATIONS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 """Schema migrations, keyed by the version they upgrade from.
@@ -60,7 +60,9 @@ def _read_json(path: Path) -> Any:
         raise SignalConfigError(f"{path} is not valid JSON: {exc}") from None
 
 
-def resolve_sources(value: Any, base_dir: Path) -> Any:
+def resolve_sources(
+    value: Any, base_dir: Path, *, _visiting: tuple[Path, ...] = ()
+) -> Any:
     """Replace every ``{"$source": "file.json[.gz]"}`` with that file's contents.
 
     Args:
@@ -70,15 +72,39 @@ def resolve_sources(value: Any, base_dir: Path) -> Any:
     Returns:
         The structure with every reference replaced. Referenced files may contain
         references of their own, which resolve relative to that file.
+
+    Raises:
+        SignalConfigError: If a ``$source`` isn't a path string, a file is
+            missing or not JSON, or files refer to each other in a cycle.
     """
     if isinstance(value, Mapping):
         if set(value) == {SOURCE_KEY}:
-            path = Path(value[SOURCE_KEY])
+            target = value[SOURCE_KEY]
+            if not isinstance(target, str) or not target.strip():
+                raise SignalConfigError(
+                    f"{SOURCE_KEY} must be the path of a JSON file, e.g. "
+                    f'{{"{SOURCE_KEY}": "table.json"}}; got {target!r}.',
+                    value=target,
+                )
+            path = Path(target)
             path = path if path.is_absolute() else base_dir / path
-            return resolve_sources(_read_json(path), path.parent)
-        return {k: resolve_sources(v, base_dir) for k, v in value.items()}
+            resolved = path.resolve()
+            if resolved in _visiting:
+                chain = " -> ".join(p.name for p in (*_visiting, resolved))
+                raise SignalConfigError(
+                    f"{SOURCE_KEY} references form a cycle ({chain}); a file can't "
+                    "include itself, directly or through other files.",
+                    value=target,
+                )
+            return resolve_sources(
+                _read_json(path), path.parent, _visiting=(*_visiting, resolved)
+            )
+        return {
+            k: resolve_sources(v, base_dir, _visiting=_visiting)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
-        return [resolve_sources(v, base_dir) for v in value]
+        return [resolve_sources(v, base_dir, _visiting=_visiting) for v in value]
     return value
 
 
@@ -152,6 +178,17 @@ def load_spec(source: SpecLike, *, base_dir: str | Path | None = None) -> Signal
     if isinstance(source, SignalSpec):
         return source
     if isinstance(source, Mapping):
+        problem = _find_non_json(source)
+        if problem is not None:
+            where, bad = problem
+            raise SignalConfigError(
+                f"the spec dict holds {bad!r} (type {type(bad).__name__}), which JSON "
+                "can't represent. Use plain Python values: str, int, float, bool, "
+                "None, lists and dicts with string keys (e.g. int(...) for a numpy "
+                "integer).",
+                field=where or None,
+                value=bad,
+            )
         data = json.loads(json.dumps(source))
         root = Path(base_dir) if base_dir is not None else Path.cwd()
     elif isinstance(source, str) and source.lstrip().startswith("{"):

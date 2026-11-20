@@ -27,7 +27,13 @@ from flexsignal.spec.models import (
     to_timedelta,
     to_utc,
 )
-from flexsignal.steps._base import StreamStep, check_streams, regular_step
+from flexsignal.steps._base import (
+    StreamStep,
+    check_streams,
+    one_is_a_list,
+    regular_step,
+    whole_steps,
+)
 
 __all__ = [
     "Align",
@@ -36,6 +42,7 @@ __all__ = [
     "Mask",
     "Rename",
     "Resample",
+    "Scale",
     "Shift",
     "Window",
 ]
@@ -319,10 +326,7 @@ class Mask(StepSpec):
         ),
     )
 
-    @field_validator("streams", mode="before")
-    @classmethod
-    def _one_stream_is_a_list(cls, value: Any) -> Any:
-        return (value,) if isinstance(value, str) else value
+    _one_stream_is_a_list = field_validator("streams", mode="before")(one_is_a_list)
 
     @model_validator(mode="after")
     def _drop_rows_is_whole_rows(self) -> Mask:
@@ -405,7 +409,43 @@ class ConvertUnits(StreamStep):
                 continue
             values[col] = convert(values[col].to_numpy(), units, self.to)
             meta[col] = meta[col].model_copy(update={"units": self.to})
-        return sf.evolve(values=values, meta=meta)
+        # Converted values keep their flags (without flags=, evolve would rebuild
+        # them from the NaNs and drop every flag set before this step).
+        return sf.evolve(values=values, flags=sf.flags, meta=meta)
+
+
+@register_step
+class Scale(StreamStep):
+    """Multiply streams by a constant and give them new units.
+
+    For a change that isn't a unit conversion, which :class:`ConvertUnits`
+    can't do: through a density (kg/h of sludge to m^3/h, ``factor=0.001`` at
+    1000 kg/m^3), a heating value, or a meter's known scale factor. The flags
+    are unchanged.
+    """
+
+    kind: Literal["scale"] = "scale"
+    factor: float = Field(description="What every value is multiplied by.")
+    units: str | None = Field(
+        description="The streams' units afterwards, e.g. m^3/hr; null if unitless."
+    )
+
+    @field_validator("factor")
+    @classmethod
+    def _finite_and_nonzero(cls, value: float) -> float:
+        if not np.isfinite(value) or value == 0:
+            raise ValueError(f"factor must be a finite, non-zero number, got {value}")
+        return value
+
+    def transform(self, sf: SignalFrame, state: Mapping[str, Any]) -> SignalFrame:
+        """Scale (see the class docstring)."""
+        check_streams(sf, self.streams)
+        values = sf.values
+        meta = dict(sf.meta)
+        for col in self.streams:
+            values[col] = values[col] * self.factor
+            meta[col] = meta[col].model_copy(update={"units": self.units})
+        return sf.evolve(values=values, flags=sf.flags, meta=meta)
 
 
 @register_step
@@ -414,7 +454,13 @@ class Combine(StepSpec):
 
     The result is flagged ``DERIVED``. For ``coalesce``, each sample takes the
     first stream (in order) that has a value, along with that stream's flags. For
-    the other methods, the result's flags are the OR of every input's flags.
+    the other methods, the result's flags are the OR of every input's flags,
+    without ``MISSING`` where the result has a value.
+
+    ``sum`` is missing wherever any input is missing, since a total with a term
+    left out is too low. ``missing_as_zero=True`` counts a missing input as 0
+    instead; a time where every input is missing stays missing. ``mean``, ``min``
+    and ``max`` use whichever inputs have a value, as for redundant meters.
     """
 
     kind: Literal["combine"] = "combine"
@@ -432,6 +478,21 @@ class Combine(StepSpec):
             "their common units."
         ),
     )
+    missing_as_zero: bool = Field(
+        False,
+        description=(
+            "For how='sum' only: count a missing input as 0 instead of making the "
+            "sum missing."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _zero_only_for_sum(self) -> Combine:
+        if self.missing_as_zero and self.how != "sum":
+            raise ValueError(
+                f"missing_as_zero applies only to how='sum', not how={self.how!r}"
+            )
+        return self
 
     def transform(self, sf: SignalFrame, state: Mapping[str, Any]) -> SignalFrame:
         """Combine (see the class docstring)."""
@@ -466,9 +527,16 @@ class Combine(StepSpec):
             out_flags = np.where(first >= 0, chosen, any_flags)
         else:
             result = getattr(block, self.how)(axis=1, skipna=True).to_numpy()
-            if self.how in ("sum",):
-                result = np.where(block.notna().any(axis=1), result, np.nan)
+            if self.how == "sum":
+                present = block.notna()
+                enough = (
+                    present.any(axis=1) if self.missing_as_zero else present.all(axis=1)
+                )
+                result = np.where(enough.to_numpy(), result, np.nan)
             out_flags = np.bitwise_or.reduce(block_flags, axis=1)
+            out_flags = np.where(
+                np.isnan(result), out_flags, out_flags & ~int(Flag.MISSING)
+            )
         out_flags = out_flags | int(Flag.DERIVED)
         out_flags = np.where(np.isnan(result), out_flags | int(Flag.MISSING), out_flags)
         values, flags = sf.values, sf.flags
@@ -496,16 +564,12 @@ class Shift(StreamStep):
         """Shift (see the class docstring)."""
         check_streams(sf, self.streams)
         step = regular_step(sf.index, kind="shift")
-        by = to_timedelta(self.by)
-        periods, remainder = divmod(by.value, step.value)
-        if remainder:
-            raise SignalConfigError(
-                f"by={self.by} is not a whole number of the data's {step} steps.",
-                field="by",
-            )
+        periods = whole_steps(
+            to_timedelta(self.by), step, what=f"by={self.by}", field="by"
+        )
         values, flags = sf.values, sf.flags
         for col in self.streams:
-            values[col] = values[col].shift(int(periods))
-            shifted = flags[col].shift(int(periods), fill_value=int(Flag.MISSING))
+            values[col] = values[col].shift(periods)
+            shifted = flags[col].shift(periods, fill_value=int(Flag.MISSING))
             flags[col] = shifted.astype(FLAG_DTYPE)
         return sf.evolve(values=values, flags=flags)

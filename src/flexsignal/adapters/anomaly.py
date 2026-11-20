@@ -25,8 +25,10 @@ raises an error naming the ``anomaly`` extra.
 from __future__ import annotations
 
 import importlib
+import inspect
 import pkgutil
 import re
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -94,20 +96,44 @@ def _snake(name: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
 
 
+def _pyod_modules(name: str, path: list[str]) -> list[str]:
+    """The pyod.models modules that may define detector ``name``.
+
+    First the modules named like it (``ecod`` for ECOD, ``feature_bagging`` for
+    FeatureBagging); then any other module whose source defines the class. The
+    source is only read, not imported: importing every pyod module is slow and
+    prints install hints for the libraries some detectors need.
+    """
+    found = list(dict.fromkeys([name.lower(), _snake(name)]))
+    defines = re.compile(rf"^class {re.escape(name)}", re.MULTILINE)
+    for info in pkgutil.iter_modules(path):
+        if info.name in found:
+            continue
+        folder = Path(getattr(info.module_finder, "path", ""))
+        source = (
+            folder / info.name / "__init__.py"
+            if info.ispkg
+            else folder / f"{info.name}.py"
+        )
+        try:
+            text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if defines.search(text):
+            found.append(info.name)
+    return found
+
+
 def _pyod_class(name: str, method: str) -> type:
     """Find a pyod detector by class name, in pyod.models' own modules."""
     if name in _PYOD_MODELS:
         return getattr(require(_PYOD_MODELS[name][0], EXTRA, method=method), name)
     models = require("pyod.models", EXTRA, method=method)
     base = require("pyod.models.base", EXTRA, method=method).BaseDetector
-    candidates = dict.fromkeys([name.lower(), _snake(name)])
-    candidates.update(
-        dict.fromkeys(m.name for m in pkgutil.iter_modules(models.__path__))
-    )
-    for module_name in candidates:
+    for module_name in _pyod_modules(name, list(models.__path__)):
         try:
             module = importlib.import_module(f"pyod.models.{module_name}")
-        except ImportError:  # e.g. a detector needing an uninstalled library
+        except ImportError:  # no such module, or one needing an uninstalled library
             continue
         if isinstance(getattr(module, name, None), type):
             return model_class(module, name, PYOD_OPTION, base=base)
@@ -349,9 +375,21 @@ def ruptures_changepoint(
     s = (x - np.median(x)) / sigma
     base = require("ruptures.base", EXTRA, method=method).BaseEstimator
     cls = model_class(rpt, algorithm, RUPTURES_OPTION, base=base)
+    settings: dict[str, Any] = {"model": cost, "min_size": min_size, "jump": 1}
+    takes = inspect.signature(cls.__init__).parameters
+    if "model" not in takes and "kernel" in takes:  # KernelCPD
+        if cost != "l2":
+            raise SignalConfigError(
+                f"{method}: ruptures {algorithm} takes a kernel, not a cost, so "
+                f"cost={cost!r} can't be used; use cost='l2' (its default linear "
+                'kernel) or give another kernel in params, e.g. {"kernel": "rbf"}.',
+                field="cost",
+                value=cost,
+            )
+        settings["kernel"] = "linear"
     algo = build_model(
         cls,
-        {"model": cost, "min_size": min_size, "jump": 1},
+        settings,
         params,
         RUPTURES_OPTION,
         managed=frozenset({"model", "min_size", "jump"}),

@@ -47,6 +47,11 @@ Select
 
 .. flexsignal-spec-table:: flexsignal.steps.select.ConvertUnits
 
+.. autoclass:: Scale
+   :no-members:
+
+.. flexsignal-spec-table:: flexsignal.steps.select.Scale
+
 .. autoclass:: Combine
    :no-members:
 
@@ -74,6 +79,15 @@ Clean
    :no-members:
 
 .. flexsignal-spec-table:: flexsignal.steps.clean.RateOfChange
+
+.. note::
+
+   The first valid value is always accepted, and the values after it are
+   compared with it. If that first value is itself bad (a spike or a startup
+   reading), the good values after it are rejected until enough time has passed
+   for the allowed rate to reach them, which can be most of the data. Put a
+   ``range`` or ``hampel`` step before ``rate_of_change`` so that a bad first
+   value is removed before it can become the reference.
 
 .. autoclass:: Stuck
    :no-members:
@@ -104,6 +118,13 @@ Clean
    :no-members:
 
 .. flexsignal-spec-table:: flexsignal.steps.clean.Detotalize
+
+.. note::
+
+   ``rollover`` is the counter's modulus, its maximum reading + 1: for a 6-digit
+   counter that reads 0 to 999999, set ``rollover=1000000``. (The "e.g. 999999"
+   in the description above is the counter's maximum reading, which is one
+   less than ``rollover``.)
 
 Correct
 -------
@@ -141,20 +162,15 @@ Impute
 
 .. flexsignal-spec-table:: flexsignal.steps.impute.Kalman
 
-.. autoclass:: SeasonalTerm
-   :no-members:
-
-.. flexsignal-spec-table:: flexsignal.steps.impute.SeasonalTerm
-
 .. autoclass:: Regression
    :no-members:
 
 .. flexsignal-spec-table:: flexsignal.steps.impute.Regression
 
-.. autoclass:: FourierTerm
+.. autoclass:: CycleTerm
    :no-members:
 
-.. flexsignal-spec-table:: flexsignal.steps.impute.FourierTerm
+.. flexsignal-spec-table:: flexsignal.steps.impute.CycleTerm
 
 .. autoclass:: KNN
    :no-members:

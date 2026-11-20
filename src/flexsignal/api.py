@@ -18,9 +18,14 @@ import pandas as pd
 
 from flexsignal.core.frame import SignalFrame
 from flexsignal.io import write_csv, write_parquet
-from flexsignal.pipeline import DataLike, FittedPipeline, Pipeline, Progress
-from flexsignal.spec import CsvOutput, ParquetOutput, SignalSpec, load_spec
-from flexsignal.steps.registered import load_plugins
+from flexsignal.pipeline import (
+    DataLike,
+    FittedPipeline,
+    Pipeline,
+    Progress,
+    resolve_spec,
+)
+from flexsignal.spec import CsvOutput, ParquetOutput, SignalSpec
 
 __all__ = ["RunResult", "fit", "run"]
 
@@ -76,21 +81,6 @@ class RunResult:
         }
 
 
-def _resolve(
-    spec: SignalSpec | Mapping[str, Any] | str | Path,
-    base_dir: str | Path | None,
-    plugins: Sequence[str] = (),
-) -> tuple[SignalSpec, Path]:
-    if isinstance(plugins, str):
-        plugins = [plugins]
-    load_plugins(*plugins)
-    if isinstance(spec, str | Path) and not str(spec).lstrip().startswith("{"):
-        root = Path(base_dir) if base_dir is not None else Path(spec).parent
-        return load_spec(spec, base_dir=root), root
-    root = Path(base_dir) if base_dir is not None else Path.cwd()
-    return load_spec(spec, base_dir=root), root
-
-
 def fit(
     spec: SignalSpec | Mapping[str, Any] | str | Path,
     data: DataLike = None,
@@ -116,7 +106,7 @@ def fit(
     Returns:
         The fitted pipeline.
     """
-    resolved, root = _resolve(spec, base_dir, plugins)
+    resolved, root = resolve_spec(spec, base_dir, plugins)
     return Pipeline.from_spec(resolved).fit(data, base_dir=root, progress=progress)
 
 
@@ -147,7 +137,7 @@ def run(
     Returns:
         A :class:`RunResult`.
     """
-    resolved, root = _resolve(spec, base_dir, plugins)
+    resolved, root = resolve_spec(spec, base_dir, plugins)
     fitted, signal = Pipeline.from_spec(resolved).fit_transform(
         data, base_dir=root, progress=progress
     )

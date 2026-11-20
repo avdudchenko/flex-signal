@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -19,8 +19,11 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
 ]
-# Core dependencies (PLAN.md §5.1): wheel-only, no torch. Heavy or specialised
+keywords = ["timeseries", "data cleaning", "imputation", "forecasting", "flex-pse"]
+# Core dependencies: wheel-only, no torch. Heavy or specialised
 # libraries (PyPOTS, Nixtla, darts, foundation models, ...) are optional
 # extras, imported lazily, and are added in the milestone whose code uses them.
 dependencies = [
@@ -43,8 +46,8 @@ Changelog = "https://github.com/flex-pse/flex-signal/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Backend and integration extras are declared in the milestone that adds their
-# adapter, so an extra never installs packages nothing uses yet (PLAN.md §5.2).
-# Every library here supports pandas 3, as flex-pse requires (PLAN.md D23). The
+# adapter, so an extra never installs packages nothing uses yet.
+# Every library here supports pandas 3, as flex-pse requires. The
 # lower bounds are the versions the adapters were tested with.
 units = ["pint>=0.24"]  # 0.26 needs Python 3.12; 0.24 still supports 3.11
 anomaly = ["pyod>=3.6", "ruptures>=1.1.10", "stumpy>=1.14"]
@@ -73,7 +76,7 @@ dev = [
     "diff-cover",
 ]
 docs = ["sphinx", "myst-parser", "furo"]
-# The marimo tutorials in tutorials/ (PLAN.md D12). marimo is pinned so every
+# The marimo tutorials in tutorials/. marimo is pinned so every
 # tutorial runs, and exports, the same everywhere; bump it deliberately.
 tutorials = ["marimo==0.24.0", "matplotlib"]
 
@@ -83,6 +86,13 @@ omit = ["*/tests/*"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+# Tests live next to the code but stay out of the wheel; the sdist keeps them
+# (MANIFEST.in), with their data.
+exclude = ["*.tests", "*.tests.*", "tests", "tests.*"]
+
+[tool.setuptools]
+# Only the package data listed below; MANIFEST.in adds the tests to the sdist only.
+include-package-data = false
 
 [tool.setuptools.package-data]
 flexsignal = ["py.typed", "spec/schemas/*.json"]
@@ -98,7 +108,7 @@ markers = [
 
 [tool.ruff.lint]
 # flex-pse's rule set plus "D", so the Google docstring convention is actually
-# enforced (matches flex-orchestrator; PLAN.md §7).
+# enforced (matches flex-orchestrator).
 select = ["E", "F", "I", "B", "UP", "D"]
 pydocstyle.convention = "google"
 

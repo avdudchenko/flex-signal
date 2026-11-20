@@ -30,7 +30,13 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from flexsignal.adapters._common import regular_step, require, seed_torch, steps_in
+from flexsignal.adapters._common import (
+    quantile_key,
+    regular_step,
+    require,
+    seeded,
+    steps_in,
+)
 from flexsignal.backends import register_backend
 from flexsignal.core.exceptions import (
     SignalBackendError,
@@ -61,14 +67,8 @@ PINNED_REVISIONS: dict[str, str] = {
 }
 """The Hugging Face commit each model runs at when ``revision`` is not given."""
 
-_TIMESFM_CLASSES = {"google/timesfm-2.5-200m-pytorch": "TimesFM_2p5_200M_torch"}
-
 # Every whole-percent quantile: flex-signal picks the ones a step asks for.
 _LEVELS = [round(i / 100, 2) for i in range(1, 100)]
-
-
-def _quantile_key(q: float) -> str:
-    return f"q{round(q * 100):02d}"
 
 
 def _grid(
@@ -91,16 +91,18 @@ def _context(
     context: str | None,
     method: str = METHOD,
 ) -> pd.DataFrame:
-    target = history.iloc[:, 0]
-    if target.notna().sum() < 2:
-        raise SignalDataError(
-            f"{method}: {target.name!r} needs at least two values in its history."
-        )
+    """The history the model reads: the last ``context`` of it, from its first value."""
     if context is not None:
         n = steps_in(context, step, field="context", method=method)
         history = history.iloc[-n:]
-    first = history.iloc[:, 0].first_valid_index()
-    return history.loc[first:] if first is not None else history
+    target = history.iloc[:, 0]
+    if target.notna().sum() < 2:
+        where = "its history" if context is None else f"the last {context} (context)"
+        raise SignalDataError(
+            f"{method}: {target.name!r} needs at least two values in {where}; "
+            + ("give it more history." if context is None else "use a longer context.")
+        )
+    return history.loc[target.first_valid_index() :]
 
 
 def _revision(model: str, revision: str | None, method: str) -> str:
@@ -137,7 +139,6 @@ def _run_chronos(
     pipeline = _chronos(model, revision)
     import torch
 
-    seed_torch(0)
     target = history.iloc[:, 0].to_numpy(dtype="float64")
     inputs: dict[str, Any] = {"target": target}
     if history.shape[1] > 1:
@@ -147,19 +148,18 @@ def _run_chronos(
         inputs["future_covariates"] = {
             str(c): future[c].to_numpy(dtype="float64") for c in history.columns[1:]
         }
-    with torch.inference_mode():
+    with seeded(0), torch.inference_mode():
         quantiles, _ = pipeline.predict_quantiles(
             [inputs], prediction_length=steps, quantile_levels=_LEVELS
         )
     q = quantiles[0][0].to(torch.float64).numpy()  # (steps, levels)
-    out = {_quantile_key(level): q[:, i] for i, level in enumerate(_LEVELS)}
+    out = {quantile_key(level): q[:, i] for i, level in enumerate(_LEVELS)}
     out["mean"] = out["q50"]
     return out
 
 
-def _run_timesfm(
-    history: pd.DataFrame, model: str, revision: str, steps: int
-) -> dict[str, np.ndarray]:
+@lru_cache(maxsize=1)
+def _timesfm(model: str, revision: str) -> Any:
     try:
         timesfm = importlib.import_module("timesfm")
     except ImportError as exc:
@@ -169,28 +169,27 @@ def _run_timesfm(
             "flex-signal[foundation]).",
             value=model,
         ) from exc
+    return timesfm, timesfm.TimesFM_2p5_200M_torch.from_pretrained(
+        model, revision=revision
+    )
+
+
+def _run_timesfm(
+    history: pd.DataFrame, model: str, revision: str, steps: int
+) -> dict[str, np.ndarray]:
     if history.shape[1] > 1:
         raise SignalConfigError(
             f"{METHOD}: TimesFM models don't take exog streams here; drop exog or "
             "use model='amazon/chronos-2', which uses them as covariates.",
             field="exog",
         )
-    name = _TIMESFM_CLASSES.get(model)
-    cls = getattr(timesfm, name, None) if name else None
-    if cls is None:
-        raise SignalBackendError(
-            f"{METHOD}: the installed timesfm has no loader flex-signal knows for "
-            f"{model}; use model='google/timesfm-2.5-200m-pytorch' or "
-            "model='amazon/chronos-2'.",
-            value=model,
-        )
-    seed_torch(0)
-    tfm = cls.from_pretrained(model, revision=revision)
+    timesfm, tfm = _timesfm(model, revision)
     tfm.compile(timesfm.ForecastConfig(max_context=len(history), max_horizon=steps))
     y = history.iloc[:, 0].interpolate(limit_direction="both").to_numpy("float64")
-    point, quantiles = tfm.forecast(horizon=steps, inputs=[y])
+    with seeded(0):
+        point, quantiles = tfm.forecast(horizon=steps, inputs=[y])
     q = np.asarray(quantiles, dtype="float64")[0]  # (steps, mean + q10..q90)
-    out = {f"q{10 * i:02d}": q[:, i] for i in range(1, 10)}
+    out = {quantile_key(i / 10): q[:, i] for i in range(1, 10)}
     out["mean"] = np.asarray(point, dtype="float64")[0]
     return out
 
@@ -297,14 +296,13 @@ def t0_forecast(
     forecaster = _t0(model, revision)
     import torch
 
-    seed_torch(0)
     target = window.iloc[:, 0].to_numpy(dtype="float32")
     kwargs: dict[str, Any] = {}
     if window.shape[1] > 1:
         exog = pd.concat([window.iloc[:, 1:], future[window.columns[1:]]])
         covariates = exog.to_numpy(dtype="float32").T[None]  # (1, F, T + H)
         kwargs["future_covariates"] = torch.from_numpy(covariates.copy())
-    with torch.inference_mode():
+    with seeded(0), torch.inference_mode():
         out = forecaster.predict(
             torch.from_numpy(target)[None],
             horizon=steps,
@@ -312,7 +310,7 @@ def t0_forecast(
             **kwargs,
         )
     q = out.quantiles[0].to(torch.float64).numpy()  # (steps, levels)
-    result = {_quantile_key(level): q[:, i] for i, level in enumerate(_LEVELS)}
+    result = {quantile_key(level): q[:, i] for i, level in enumerate(_LEVELS)}
     result["mean"] = result["q50"]
     return result
 

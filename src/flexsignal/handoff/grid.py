@@ -42,6 +42,7 @@ MARGIN = pd.Timedelta(days=1)
 _ESTIMATED = int(
     Flag.IMPUTED_SHORT | Flag.IMPUTED_MODEL | Flag.CORRECTED | Flag.FORECAST
 )
+_RESAMPLED = int(Flag.RESAMPLED)
 
 
 @dataclass
@@ -59,6 +60,11 @@ class GridValues:
             filled, corrected or forecast}`` (flags ``IMPUTED_SHORT``,
             ``IMPUTED_MODEL``, ``CORRECTED``, ``FORECAST``). Zero for data without
             flags.
+        resampled: ``{column: time steps whose value draws on samples flex-signal
+            put on a new time grid}`` (flag ``RESAMPLED``, from ``align`` or
+            ``resample``). Not counted in ``estimated``: a mean of real samples is
+            a measurement, but after upsampling (``align`` to a finer grid) most
+            values are interpolated between readings. Zero for data without flags.
         window: The data read, in the facility's time: ``{"start", "end"}``, or
             None for a model without a time axis.
         timezone: The facility's time zone.
@@ -70,19 +76,36 @@ class GridValues:
     estimated: dict[str, int] = field(default_factory=dict)
     window: dict[str, str] | None = None
     timezone: str = "UTC"
+    resampled: dict[str, int] = field(default_factory=dict)
 
-    def to_overrides(self, rename: Mapping[str, str] | None = None) -> dict[str, Any]:
+    def to_overrides(
+        self, rename: Mapping[str, str] | None = None, *, strict: bool = False
+    ) -> dict[str, Any]:
         """Return ``{model path: value}``, as ``flexpse.apply_values`` takes it.
 
         Args:
             rename: Column → model path, e.g. ``{"flow": "plant.pump.flow_in"}``.
                 Columns not listed keep their name.
+            strict: Require every column to be in ``rename``, so a column left
+                out can't be applied to a model path that happens to match its
+                name.
 
         Returns:
             Each value as is, or ``{"value": ..., "units": ...}`` when the column
             has units.
+
+        Raises:
+            SignalConfigError: With ``strict``, if a column isn't in ``rename``.
         """
         rename = dict(rename or {})
+        if strict:
+            missing = [c for c in self.values if c not in rename]
+            if missing:
+                raise SignalConfigError(
+                    f"columns {missing} have no model path in rename; add them, or "
+                    "leave them out of the data given to to_grid.",
+                    field="rename",
+                )
         out: dict[str, Any] = {}
         for column, value in self.values.items():
             unit = self.units.get(column)
@@ -292,25 +315,33 @@ def to_grid(
     values: dict[str, Any] = {}
     filled: dict[str, int] = {}
     estimated: dict[str, int] = {}
+    resampled: dict[str, int] = {}
     for column in frame.columns:
         series = frame[column]
         if options.reduce is not None:
             values[column] = _reduce(series, options, start, end)
             continue
         values[column], filled[column] = _series(series, options, grid)
-        if flags is not None:
-            marked = ((flags[column].to_numpy() & _ESTIMATED) != 0) & (
+        for counts, bits in ((estimated, _ESTIMATED), (resampled, _RESAMPLED)):
+            if flags is None:
+                counts[column] = 0
+                continue
+            marked = ((flags[column].to_numpy() & bits) != 0) & (
                 series.notna().to_numpy()
             )
-            estimated[column] = _count_estimated(
+            counts[column] = _count_estimated(
                 pd.Series(marked.astype(float), index=series.index, name=column),
                 options,
                 grid,
             )
-        else:
-            estimated[column] = 0
     return GridValues(
-        values, unit_out, filled, estimated, record, timezone=options.timezone
+        values,
+        unit_out,
+        filled,
+        estimated,
+        record,
+        timezone=options.timezone,
+        resampled=resampled,
     )
 
 

@@ -229,7 +229,7 @@ def _arg_docs(fn: Callable[..., Any]) -> dict[str, str]:
     return out
 
 
-def _summary(fn: Callable[..., Any], role: str, name: str) -> str:
+def _summary(fn: Callable[..., Any], role: str) -> str:
     doc = inspect.getdoc(fn) or ""
     first = doc.split("\n\n", 1)[0].strip()
     source = f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', '?')}"
@@ -353,7 +353,7 @@ def _register(
         name,
         __base__=base,
         __module__=source["module"],
-        __doc__=_summary(fn, role, name),
+        __doc__=_summary(fn, role),
         kind=(Literal[name], Field(name, description="Which step this is.")),
         **fields,
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -12,7 +12,7 @@ from pydantic import Field, field_validator
 from flexsignal.core.exceptions import SignalConfigError, SignalDataError
 from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
-from flexsignal.spec.models import StepSpec
+from flexsignal.spec.models import StepSpec, to_timedelta
 
 
 def check_streams(
@@ -71,6 +71,86 @@ def regular_step(index: pd.DatetimeIndex, *, kind: str) -> pd.Timedelta:
             "run align or resample first."
         )
     return pd.Timedelta(int(diffs[0]), unit="ns")
+
+
+def whole_steps(
+    duration: pd.Timedelta,
+    step: pd.Timedelta,
+    *,
+    what: str,
+    field: str,
+    error: str | None = None,
+) -> int:
+    """Return how many of the data's steps ``duration`` is, or raise.
+
+    Args:
+        duration: The length to convert, e.g. a horizon or a lag.
+        step: The data's step, from :func:`regular_step`.
+        what: How the error names the duration, e.g. ``"lag 7min"``.
+        field: The spec field the error points at.
+        error: A whole error message to use instead of the default one.
+
+    Raises:
+        SignalConfigError: If ``duration`` isn't a whole number of steps.
+    """
+    periods, remainder = divmod(duration.value, step.value)
+    if remainder:
+        raise SignalConfigError(
+            error or f"{what} isn't a whole number of the data's {step} steps.",
+            field=field,
+        )
+    return int(periods)
+
+
+def one_is_a_list(cls: type, value: Any) -> Any:
+    """A ``mode="before"`` validator body: a lone string becomes a 1-tuple.
+
+    Use it as ``_x = field_validator("features", mode="before")(one_is_a_list)``;
+    give each class's validator its own attribute name, so a subclass doesn't
+    replace its parent's.
+    """
+    return (value,) if isinstance(value, str) else value
+
+
+def structural_args(
+    level: str, seasonal: Sequence[Any], step: pd.Timedelta
+) -> dict[str, Any]:
+    """Return UnobservedComponents' ``level`` and ``freq_seasonal`` arguments.
+
+    Args:
+        level: ``"local_level"`` or ``"local_linear_trend"``.
+        seasonal: Terms with a ``period`` duration and ``harmonics``.
+        step: The data's step; periods are given to statsmodels in steps.
+    """
+    freq_seasonal = [
+        {"period": to_timedelta(term.period) / step, "harmonics": term.pairs(2)}
+        for term in seasonal
+    ]
+    return {
+        "level": {"local_level": "llevel", "local_linear_trend": "lltrend"}[level],
+        "freq_seasonal": freq_seasonal or None,
+    }
+
+
+def registered_lookup(module: str, role: str) -> Callable[[str], type]:
+    """Return a module ``__getattr__`` that finds registered methods of ``role``.
+
+    With it, ``fs.clean.my_cleaner`` is the step class that
+    ``fs.register_cleaner`` made for ``my_cleaner``.
+    """
+
+    def __getattr__(name: str) -> type:
+        if name.startswith("_"):
+            raise AttributeError(f"module {module!r} has no attribute {name!r}")
+        from flexsignal.steps.registered import registered_class
+
+        cls = registered_class(role, name)
+        if cls is None:
+            raise AttributeError(f"module {module!r} has no attribute {name!r}")
+        return cls
+
+    __getattr__.__doc__ = f"Return the registered {role} called ``name``."
+    return __getattr__
 
 
 def gaps_to_fill(
@@ -156,7 +236,4 @@ class StreamStep(StepSpec):
             data["streams"] = streams
         super().__init__(**data)
 
-    @field_validator("streams", mode="before")
-    @classmethod
-    def _one_stream_is_a_list(cls, value: Any) -> Any:
-        return (value,) if isinstance(value, str) else value
+    _one_stream_is_a_list = field_validator("streams", mode="before")(one_is_a_list)

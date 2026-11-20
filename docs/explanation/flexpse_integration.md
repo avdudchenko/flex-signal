@@ -40,7 +40,8 @@ much from a database.
 `to_grid`'s gap rules are a last resort for the odd empty step. Clean and fill the data with flex-signal first, where
 each method suits the gap ([Imputation tiers](imputation_tiers.md)) and each value is flagged. Then hand off with
 `gaps="error"`, so nothing is filled silently. Given a `SignalFrame`, `to_grid` also reports
-{attr}`~flexsignal.handoff.GridValues.estimated`: how many steps rest on samples flex-signal filled, corrected or forecast.
+{attr}`~flexsignal.handoff.GridValues.estimated`: how many steps rest on samples flex-signal filled, corrected or forecast,
+and {attr}`~flexsignal.handoff.GridValues.resampled`: how many rest on samples put on a new time grid.
 
 ## Into the model
 

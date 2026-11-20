@@ -66,7 +66,9 @@ def timesfm(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "timesfm", module)
     _FakeTimesFM.seen = {}
-    return module
+    foundation._timesfm.cache_clear()
+    yield module
+    foundation._timesfm.cache_clear()
 
 
 @pytest.mark.unit
@@ -82,15 +84,11 @@ def test_timesfm_forecasts_at_the_pinned_revision(timesfm):
 
 
 @pytest.mark.unit
-def test_timesfm_refuses_exog_and_unknown_loaders(timesfm, monkeypatch):
+def test_timesfm_refuses_exog(timesfm):
     history, future = _frames(exog=True)
     with pytest.raises(SignalConfigError, match="don't take exog") as err:
         foundation.chronos_forecast(history, future, model=TIMESFM)
     assert err.value.field == "exog"
-    monkeypatch.delattr(timesfm, "TimesFM_2p5_200M_torch")
-    history, future = _frames()
-    with pytest.raises(SignalBackendError, match="has no loader"):
-        foundation.chronos_forecast(history, future, model=TIMESFM)
 
 
 # -- a stand-in t0 -------------------------------------------------------------------

@@ -94,8 +94,8 @@ def test_bad_options_fail_when_the_spec_loads(option, value):
     ("options", "field", "match"),
     [
         ({"max_steps": 0}, "max_steps", "at least 1"),
-        ({"params": {"h": 3}}, "params.h", "flex-signal sets it"),
-        ({"params": {"n_blokcs": [1]}}, "params.n_blokcs", "has no argument"),
+        ({"params": {"h": 3}}, "params", "flex-signal sets those"),
+        ({"params": {"n_blokcs": [1]}}, "params", "isn't an argument"),
     ],
 )
 def test_bad_values_are_refused_before_training(neuralforecast, options, field, match):
@@ -175,7 +175,7 @@ def test_point_loss_and_exog(neuralforecast):
     error = np.abs(result.values["load"].to_numpy()[-24:] - truth).mean()
     # The price is random, so without it the error would be about 2.5 kW.
     assert error < 1.5, error
-    with pytest.raises(SignalDataError, match="no 'std'"):
+    with pytest.raises(SignalConfigError, match="loss='mse' trains a single"):
         fs.run(
             fs.Pipeline(
                 [

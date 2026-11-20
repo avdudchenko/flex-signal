@@ -35,7 +35,7 @@ from flexsignal.core.flags import FLAG_DTYPE, Flag
 from flexsignal.core.frame import SignalFrame
 from flexsignal.core.registry import register_step
 from flexsignal.spec.models import Duration, StepSpec, StrictModel, to_timedelta
-from flexsignal.steps._base import check_streams
+from flexsignal.steps._base import check_streams, one_is_a_list
 
 __all__ = ["Calibrate", "RollingRefit"]
 
@@ -181,10 +181,7 @@ class Calibrate(StepSpec):
     def _known_model(cls, value: str) -> str:
         return check_model_key(value)
 
-    @field_validator("features", mode="before")
-    @classmethod
-    def _one_feature_is_a_list(cls, value: Any) -> Any:
-        return (value,) if isinstance(value, str) else value
+    _one_feature_is_a_list = field_validator("features", mode="before")(one_is_a_list)
 
     @model_validator(mode="after")
     def _formula_with_curve_fit(self) -> Calibrate:
@@ -241,7 +238,10 @@ class Calibrate(StepSpec):
     def _fit_rows(self, sf: SignalFrame, rows: np.ndarray) -> dict[str, Any]:
         values = sf.values.loc[rows]
         inputs = self._inputs()
-        usable = values[inputs + [self.target]].notna().all(axis=1).to_numpy()
+        # The target is needed only where it is an input: in residual mode, or
+        # when the features (or the formula) name it.
+        needed = inputs + [self.target] if self.mode == "residual" else inputs
+        usable = values[needed].notna().all(axis=1).to_numpy()
         values = values.loc[usable]
         y = values[self.reference].to_numpy()
         if self.mode == "residual":

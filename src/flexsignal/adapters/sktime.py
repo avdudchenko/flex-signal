@@ -14,10 +14,8 @@ itself is imported only when the step runs.
 
 from __future__ import annotations
 
-import re
-import warnings
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from functools import lru_cache
 from types import SimpleNamespace
 from typing import Any
@@ -26,12 +24,15 @@ import numpy as np
 import pandas as pd
 
 from flexsignal.adapters._common import (
+    Forecast,
     ModelName,
+    Prepared,
+    build_model,
     model_class,
     model_option,
-    regular_step,
+    quiet_pandas,
     require,
-    steps_in,
+    season_steps,
 )
 from flexsignal.backends import register_backend
 from flexsignal.core.exceptions import SignalConfigError, SignalDataError
@@ -95,130 +96,26 @@ _RESERVED = {
 }
 """Arguments a spec can't set: they take Python objects or start processes."""
 
-_QUANTILE_KEY = re.compile(r"q\d\d")
+_SEASONAL = (
+    "NaiveForecaster",
+    "ThetaForecaster",
+    "STLForecaster",
+    "ExponentialSmoothing",
+    "AutoETS",
+    "SARIMAX",
+    "UnobservedComponents",
+)
+"""The forecasters that use ``season``."""
+
+_EXOG_MODELS = "SARIMAX or UnobservedComponents"
+_INTERVAL_MODELS = (
+    "NaiveForecaster, ThetaForecaster, AutoETS, SARIMAX or UnobservedComponents"
+)
 
 
-# -- the history as the library wants it ------------------------------------------
-
-
-def _naive(index: pd.DatetimeIndex, step: pd.Timedelta) -> pd.DatetimeIndex:
-    """The index as naive UTC times carrying the data's frequency."""
-    if index.tz is not None:
-        index = index.tz_convert("UTC").tz_localize(None)
-    return pd.DatetimeIndex(index, freq=pd.tseries.frequencies.to_offset(step))
-
-
-class _Prepared:
-    """The target's history and the exog streams, ready for a library."""
-
-    def __init__(self, history: pd.DataFrame, future: pd.DataFrame, method: str):
-        self.stream = str(history.columns[0])
-        self.step = regular_step(history.index, method)
-        target = history.iloc[:, 0].astype("float64")
-        valid = np.flatnonzero(target.notna().to_numpy())
-        if len(valid) < 2:
-            raise SignalDataError(
-                f"{method}: {self.stream!r} has fewer than two values up to the "
-                "issue time, so there is nothing to fit on."
-            )
-        first, last = int(valid[0]), int(valid[-1])
-        y = target.iloc[first : last + 1].interpolate(method="linear")
-        self.y = pd.Series(y.to_numpy(), index=_naive(y.index, self.step))
-        """The target from its first to its last value, gaps interpolated."""
-        self.n_ahead = len(target) - 1 - last + len(future)
-        """How many steps after the last value the forecast reaches."""
-        self.future_index = _naive(future.index, self.step)
-        self.exog = list(history.columns[1:])
-        self.covariates: pd.DataFrame | None = None
-        """The exog streams from the target's first value to the forecast's end."""
-        if self.exog:
-            both = pd.concat([history[self.exog].iloc[first:], future[self.exog]])
-            both = both.astype("float64").interpolate(limit_direction="both")
-            empty = [c for c in self.exog if both[c].isna().all()]
-            if empty:
-                raise SignalDataError(
-                    f"{method}: exog stream {empty[0]!r} has no values to use."
-                )
-            self.covariates = pd.DataFrame(
-                both.to_numpy(), index=_naive(both.index, self.step), columns=self.exog
-            )
-
-    def check_times(self, times: pd.Index, method: str) -> None:
-        """Check a library's forecast times are the forecast rows."""
-        got = pd.DatetimeIndex(times[-len(self.future_index) :]).as_unit("ns")
-        if len(times) != self.n_ahead or not np.array_equal(
-            got.asi8, self.future_index.as_unit("ns").asi8
-        ):
-            raise SignalDataError(  # pragma: no cover - a library bug
-                f"{method}: the library forecast times {got[0]}..{got[-1]}, not the "
-                f"forecast rows {self.future_index[0]}..{self.future_index[-1]}."
-            )
-
-
-class _Forecast(Mapping):
-    """A forecast's mean, with quantiles computed only when they are read.
-
-    flex-signal asks for ``"q10"``-style keys only when the step has
-    ``quantiles``. When the model gives no intervals, asking for ``"std"`` (the
-    last thing flex-signal tries) raises an error that says why.
-    """
-
-    def __init__(
-        self,
-        mean: np.ndarray,
-        quantile: Callable[[float], np.ndarray] | None,
-        refusal: str,
-    ):
-        self._mean = mean
-        self._quantile = quantile
-        self._refusal = refusal
-        self._cache: dict[str, np.ndarray] = {}
-
-    def __contains__(self, key: object) -> bool:
-        if key == "mean":
-            return True
-        if isinstance(key, str) and _QUANTILE_KEY.fullmatch(key):
-            return self._quantile is not None
-        if key == "std" and self._quantile is None:
-            raise SignalConfigError(self._refusal, field="quantiles")
-        return False
-
-    def __getitem__(self, key: str) -> np.ndarray:
-        if key == "mean":
-            return self._mean
-        if self._quantile is not None and _QUANTILE_KEY.fullmatch(str(key)):
-            if key not in self._cache:
-                self._cache[key] = self._quantile(int(key[1:]) / 100)
-            return self._cache[key]
-        raise KeyError(key)
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(("mean",))
-
-    def __len__(self) -> int:
-        return 1
-
-
-def _season_steps(season: str | None, step: pd.Timedelta, method: str) -> int | None:
-    """How many data steps ``season`` covers, or None without a season."""
-    if season is None:
-        return None
-    try:
-        pd.Timedelta(season)
-    except (TypeError, ValueError):
-        raise SignalConfigError(
-            f"{method}: season {season!r} isn't a duration, e.g. 1D, or null.",
-            field="season",
-        ) from None
-    return steps_in(season, step, field="season", method=method)
-
-
-@contextmanager
-def _quiet() -> Iterator[None]:
+def _quiet() -> AbstractContextManager[None]:
     """Hide sktime's own deprecation warnings, which a user can't act on."""
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=pd.errors.Pandas4Warning)
-        yield
+    return quiet_pandas()
 
 
 # -- the sktime forecaster ------------------------------------------------------------
@@ -233,7 +130,7 @@ def _defaults(model: str, season: int | None, params: Mapping[str, Any]) -> dict
         kwargs["order"] = (1, 0, 0)
     if model == "UnobservedComponents":
         kwargs["level"] = "local level"
-    if season is None:
+    if season is None or season < 2:  # a one-step season is no cycle
         return kwargs
     if model in ("NaiveForecaster", "ThetaForecaster", "STLForecaster"):
         kwargs["sp"] = season
@@ -265,41 +162,23 @@ def _build(model: str, params: Mapping[str, Any], season: int | None, seed: int)
         cls = getattr(require(_MODULES[model], EXTRA, method=NAME), model)
     else:
         cls = model_class(_all_forecasters(), model, OPTION, base=base)
-    if not isinstance(params, Mapping):
-        raise SignalConfigError(
-            f"{NAME}: params must be a dict of {model} arguments.", field="params"
-        )
-    names = cls.get_param_names()
-    for key in params:
-        if key in _RESERVED:
-            raise SignalConfigError(
-                f"{NAME}: params {key!r} takes a Python object, so a spec can't set "
-                "it; remove it.",
-                field="params",
-                value=key,
-            )
-        if key not in names:
-            raise SignalConfigError(
-                f"{NAME}: params {key!r} isn't an argument of sktime's {model}; it "
-                f"takes {', '.join(n for n in names if n not in _RESERVED)}.",
-                field="params",
-                value=key,
-            )
-    kwargs = _defaults(model, season, params)
-    kwargs.update(params)
+    settings = _defaults(model, season, params)
+    if "random_state" in cls.get_param_names():
+        settings["random_state"] = seed
+    params = dict(params)
     for key in ("order", "seasonal_order"):
-        if isinstance(kwargs.get(key), list):
-            kwargs[key] = tuple(kwargs[key])
-    if "random_state" in names:
-        kwargs.setdefault("random_state", seed)
-    try:
-        with _quiet():
-            return cls(**kwargs)
-    except (TypeError, ValueError) as exc:
-        raise SignalConfigError(
-            f"{NAME}: sktime's {model} refused its arguments {kwargs}: {exc}",
-            field="params",
-        ) from None
+        if isinstance(params.get(key), list):
+            params[key] = tuple(params[key])
+    with _quiet():
+        return build_model(
+            cls,
+            settings,
+            params,
+            OPTION,
+            managed=_RESERVED,
+            why_managed="those take Python objects or start processes, which a "
+            "spec can't give; remove them",
+        )
 
 
 def _takes_exog(estimator: Any) -> bool:
@@ -307,14 +186,6 @@ def _takes_exog(estimator: Any) -> bool:
     if tag is not None:
         return bool(tag)
     return not estimator.get_tag("ignores-exogeneous-X", True, raise_error=False)
-
-
-def _exog_models() -> str:
-    return "SARIMAX or UnobservedComponents"
-
-
-def _interval_models() -> str:
-    return "NaiveForecaster, ThetaForecaster, AutoETS, SARIMAX or UnobservedComponents"
 
 
 def sktime_forecast(
@@ -362,14 +233,14 @@ def sktime_forecast(
         intervals.
     """
     params = dict(params or {})
-    prepared = _Prepared(history, future, NAME)
-    m = _season_steps(season, prepared.step, NAME)
+    prepared = Prepared(history, future, NAME)
+    m = season_steps(season, prepared.step, NAME, used=model in _SEASONAL)
     base = require("sktime.forecasting.base", EXTRA, method=NAME)
     estimator = _build(model, params, m, seed)
     if prepared.exog and not _takes_exog(estimator):
         raise SignalConfigError(
             f"{NAME}: sktime's {model} takes no exog streams (X); remove exog or "
-            f"use {_exog_models()}.",
+            f"use {_EXOG_MODELS}.",
             field="exog",
         )
     n_fit = len(prepared.y)
@@ -401,9 +272,9 @@ def sktime_forecast(
 
     refusal = (
         f"{NAME}: sktime's {model} gives no intervals, so it can't write quantiles; "
-        f"remove quantiles or use {_interval_models()}."
+        f"remove quantiles or use {_INTERVAL_MODELS}."
     )
-    return _Forecast(mean, quantile, refusal)
+    return Forecast(mean, quantile, refusal)
 
 
 register_forecaster(NAME, sktime_forecast)

@@ -107,11 +107,11 @@ def test_bad_options_fail_on_load_with_the_field(option, value):
 @pytest.mark.parametrize(
     "options, field, words",
     [
-        ({"params": {"nope": 1}}, "params", "'nope' isn't an argument of sktime's"),
+        ({"params": {"nope": 1}}, "params", "'nope' isn't an argument of sktime"),
         (
             {"model": "STLForecaster", "params": {"forecaster_trend": {}}},
             "params",
-            "takes a Python object",
+            "take Python objects",
         ),
         ({"season": "soon"}, "season", "isn't a duration"),
     ],

@@ -61,14 +61,15 @@ print(len(values.values["flow"]), values.units["flow"], values.estimated)
 ```
 
 `gaps="error"` refuses to fill anything silently: the cleaning did that already, and flagged it. `estimated` counts
-the hourly steps that rest on filled samples.
+the hourly steps that rest on filled samples, and `resampled` those that rest on samples put on a new grid (after
+upsampling with `align`, most of those are interpolated between readings).
 
 ## 4. Fix the variables and solve
 
 `apply_values` takes a spec or a built model, with the same result. On a spec, it returns a copy to build:
 
 ```python
-overrides = values.to_overrides(rename={"flow": "site.pump.flow_in"})
+overrides = values.to_overrides(rename={"flow": "site.pump.flow_in"}, strict=True)
 model = build_model(fsp.apply_values(SPEC, overrides))
 ```
 
