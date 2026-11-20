@@ -1,4 +1,4 @@
-"""M1 acceptance: each cleaner flags exactly the faults injected into synthetic data."""
+"""Each cleaner flags exactly the faults injected into synthetic data."""
 
 import numpy as np
 import pandas as pd
@@ -168,7 +168,7 @@ def test_unknown_stream_and_too_little_data():
         )
 
 
-# -- M2: filter and detotalize -------------------------------------------------------
+# -- filter and detotalize -----------------------------------------------------------
 
 
 @pytest.mark.unit

@@ -201,7 +201,7 @@ def test_a_price_is_set_on_a_built_model_when_it_is_a_param(flexpse):
 
 @pytest.mark.integration
 def test_raw_data_to_a_solved_model_and_a_fitted_regressor(flexpse):
-    """M3 acceptance: raw data -> clean -> the model's grid -> fixed -> solved."""
+    """End to end: raw data -> clean -> the model's grid -> fixed -> solved."""
     pyo, build_model = flexpse
     pytest.importorskip("highspy")
     from flexparameterize import LinearRegressor
@@ -256,7 +256,7 @@ def test_raw_data_to_a_solved_model_and_a_fitted_regressor(flexpse):
 
 @pytest.mark.integration
 def test_a_forecast_is_fixed_into_a_model_and_solved(flexpse):
-    """M4 acceptance: tomorrow's forecast flow → the model's grid → fixed → solved."""
+    """End to end: tomorrow's forecast flow → the model's grid → fixed → solved."""
     pyo, build_model = flexpse
     pytest.importorskip("highspy")
     # A week of data, 6-12 January; the model is the next day, 13 January.

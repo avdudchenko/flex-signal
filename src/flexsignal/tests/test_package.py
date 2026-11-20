@@ -1,4 +1,4 @@
-"""Package-level guarantees that hold from M0 onward."""
+"""Package-level guarantees."""
 
 import importlib
 import subprocess

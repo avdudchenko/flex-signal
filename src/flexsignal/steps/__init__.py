@@ -12,7 +12,7 @@
 
 Every step is a frozen pydantic model, so the object you build in Python is
 exactly what a JSON spec loads into. Importing this package registers the
-built-in steps. A later milestone adds derive steps.
+built-in steps.
 """
 
 from flexsignal.steps import clean, correct, forecast, impute, registered, select

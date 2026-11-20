@@ -28,7 +28,7 @@ def _spec(forecaster):
 
 @pytest.mark.component
 def test_structural_and_regression_beat_seasonal_naive_in_a_backtest():
-    """M4 acceptance: on known daily and weekly cycles, models beat the baseline."""
+    """On known daily and weekly cycles, models beat the baseline."""
     result = fs.backtest(
         _spec(fs.forecast.Structural("flow", horizon="1D", seasonal=SEASONS)),
         _plant(),

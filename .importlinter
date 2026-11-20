@@ -32,7 +32,7 @@ modules =
     flexsignal.integrations.flexpse
     flexsignal.integrations.acquirium
 
-# D1: flex-pse imports flex-signal, never the reverse. Only the flex-pse
+# flex-pse imports flex-signal, never the reverse. Only the flex-pse
 # integration may touch flex-pse, and only lazily (inside functions).
 [importlinter:contract:no-flexpse]
 name = flex-pse is imported only by integrations.flexpse
@@ -58,7 +58,7 @@ forbidden_modules =
     pyomo
     idaes
 
-# D5/D7: polars and Acquirium appear only at the Acquirium boundary.
+# polars and Acquirium appear only at the Acquirium boundary.
 [importlinter:contract:no-acquirium]
 name = acquirium and polars are imported only by integrations.acquirium
 type = forbidden

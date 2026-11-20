@@ -103,7 +103,7 @@ def test_a_spec_with_an_unsafe_condition_fails_on_load(kind):
         fs.clean.Expression("flow", invalid_when="flow.abs() > 0")
 
 
-# -- M2: types, helpers and formulas ---------------------------------------------
+# -- types, helpers and formulas -------------------------------------------------
 
 
 def _frame():

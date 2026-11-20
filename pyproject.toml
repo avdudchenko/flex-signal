@@ -25,7 +25,7 @@ classifiers = [
 keywords = ["timeseries", "data cleaning", "imputation", "forecasting", "flex-pse"]
 # Core dependencies: wheel-only, no torch. Heavy or specialised
 # libraries (PyPOTS, Nixtla, darts, foundation models, ...) are optional
-# extras, imported lazily, and are added in the milestone whose code uses them.
+# extras, imported lazily, and are added with the code that uses them.
 dependencies = [
     "pandas>=3",
     "numpy",
@@ -45,8 +45,8 @@ Repository = "https://github.com/flex-pse/flex-signal"
 Changelog = "https://github.com/flex-pse/flex-signal/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-# Backend and integration extras are declared in the milestone that adds their
-# adapter, so an extra never installs packages nothing uses yet.
+# Backend and integration extras are declared with the adapter that uses
+# them, so an extra never installs packages nothing uses yet.
 # Every library here supports pandas 3, as flex-pse requires. The
 # lower bounds are the versions the adapters were tested with.
 units = ["pint>=0.24"]  # 0.26 needs Python 3.12; 0.24 still supports 3.11

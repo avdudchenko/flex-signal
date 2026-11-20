@@ -69,7 +69,7 @@ def test_edges_and_excluded_values_are_never_filled():
     assert out.values["x"].isna().tolist() == [True, False, True, False, False, True]
 
 
-# -- M2: model imputers and tiered ----------------------------------------------------
+# -- model imputers and tiered --------------------------------------------------------
 
 
 def _gappy(seed=0):

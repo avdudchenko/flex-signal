@@ -1,7 +1,7 @@
 """Checks for the duration and timestamp strings that specs and conditions use.
 
-A spec must give the same result on every machine and on every day it runs
-(PLAN.md D14), so a missing value (``"NaT"``) or a relative word such as
+A spec must give the same result on every machine and on every day it runs,
+so a missing value (``"NaT"``) or a relative word such as
 ``"now"`` is refused here, even though pandas would accept them.
 """
 

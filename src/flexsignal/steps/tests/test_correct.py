@@ -22,7 +22,7 @@ def _fit_transform(step, sf):
 @pytest.mark.component
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_calibrate_recovers_the_true_a(seed):
-    # The M2 acceptance test: A_clean matches the true A to within its noise.
+    # The key calibration check: A_clean matches the true A to within its noise.
     case = synthetic.abcd(seed=seed)
     step = fs.correct.Calibrate(target="A", reference="B", fit_when=TRUSTED)
     fitted, out = _fit_transform(step, case.signal())

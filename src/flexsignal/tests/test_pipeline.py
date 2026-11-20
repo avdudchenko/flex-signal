@@ -1,4 +1,4 @@
-"""M1 acceptance: Python and JSON pipelines agree bit for bit; fitted ones persist."""
+"""Python and JSON pipelines agree bit for bit; fitted ones persist."""
 
 import json
 

@@ -126,4 +126,4 @@ from JSON specs, and hand the result to flex-pse models and flex-orchestrator st
 
 - skforecast, statsforecast and mlforecast adapters: they require `pandas<3`, and flex-signal and flex-pse require
   pandas 3.
-- Acquirium sources, sinks and apps (planned).
+- Acquirium sources, sinks and apps.

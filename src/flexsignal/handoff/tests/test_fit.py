@@ -1,7 +1,7 @@
 """fit_data: input and output data prepared for a regressor.
 
-flex-orchestrator's fit-preparation tests, ported with the same data shapes
-(FLEX_ORCHESTRATOR_OVERLAP.md §4). Their frames have naive timestamps, which
+flex-orchestrator's fit-preparation tests, ported with the same data shapes.
+Their frames have naive timestamps, which
 fit_data keeps as they are.
 """
 
